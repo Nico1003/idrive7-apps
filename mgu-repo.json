@@ -31,6 +31,15 @@
       "optional": false,
       "uninstallable": true,
       "mguHmi": ["ID7", "ID8"]
+    },
+    {
+      "id": "iconix-audiod",
+      "path": "tools/iconix-audiod",
+      "title": "Iconix Audio",
+      "description": "Experimenteller Audio-Dienst für Iconix Sounds",
+      "optional": true,
+      "uninstallable": true,
+      "mguHmi": ["ID7", "ID8"]
     }
   ]
 }
