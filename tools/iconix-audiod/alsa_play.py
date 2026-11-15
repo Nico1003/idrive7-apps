@@ -5,7 +5,7 @@ Iconix Sounds – ALSA-Wiedergabe ohne aplay: Python + ctypes direkt gegen libas
 Das Head Unit hat libasound und Python 3.12 (mgu-python), aber kein aplay. Dieses Skript ersetzt aplay:
 
   alsa_play.py play <gerät> <rate>   liest S16LE-Stereo von stdin und spielt es auf <gerät> ab
-  alsa_play.py list                  gibt JSON aus: alle ALSA-PCM-Namen + ob sie sich öffnen lassen
+  alsa_play.py list [namen...]       gibt JSON aus: alle ALSA-PCM-Namen (+ zusätzliche) und ob sie sich öffnen lassen
   alsa_play.py tone <gerät> [sek]    spielt einen Testton (440 Hz) – zum Ausprobieren von Hand
 
 Ausgaben auf stderr in Zeilen wie aplay (z. B. "underrun!!!"), damit engine.js sie zählt.
@@ -105,21 +105,27 @@ def hint_names(lib):
     return out
 
 
-def cmd_list():
+def cmd_list(extra=None):
     lib = load_alsa()
     names = hint_names(lib)
     seen = set(n['name'] for n in names)
+    # Namen aus BMWs ALSA-Konfiguration (vom Dienst gefunden) mit testen
+    for extra_name in (extra or []):
+        if extra_name not in seen:
+            names.append({'name': extra_name, 'desc': 'aus Konfiguration'})
+            seen.add(extra_name)
     # die direkten Geräte der Soundkarte und übliche Namen immer mit testen
     for extra in ['default', 'plughw:0,0', 'plughw:0,1', 'hw:0,0', 'hw:0,1', 'sysdefault', 'dmix']:
         if extra not in seen:
             names.append({'name': extra, 'desc': ''})
             seen.add(extra)
     res = []
-    for n in names[:40]:
+    for n in names[:80]:
         h, e = open_pcm(lib, n['name'], 44100, 200000, nonblock=True)
         if h:
             lib.snd_pcm_close(h)
-        res.append({'name': n['name'], 'desc': n['desc'], 'ok': h is not None, 'error': e})
+        silent = n['name'] == 'null' or n['name'].startswith('null:')
+        res.append({'name': n['name'], 'desc': n['desc'], 'ok': h is not None, 'silent': silent, 'error': e})
     print(json.dumps({'devices': res}))
 
 
@@ -194,7 +200,7 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     try:
         if a and a[0] == 'list':
-            cmd_list()
+            cmd_list(a[1:])
         elif len(a) >= 3 and a[0] == 'play':
             sys.exit(cmd_play(a[1], int(a[2]), int(a[3]) if len(a) > 3 else 200000))
         elif len(a) >= 2 and a[0] == 'tone':

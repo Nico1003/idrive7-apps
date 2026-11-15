@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
@@ -43,7 +43,9 @@ function scanLines(st) {
   if (!st.scan.length) return ['ALSA-Scan: keine Geräte' + (st.scanError ? ' (' + st.scanError + ')' : '')];
   let n = 0;
   return ['ALSA-Geräte (Nummer = Einstellung "Gerät N"):'].concat(st.scan.map(function (x) {
-    return x.ok ? '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen' : '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '');
+    if (x.ok) return '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen';
+    if (x.silent) return '  -  ' + x.name + ' – stumm (verwirft den Ton)';
+    return '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '');
   }));
 }
 
@@ -91,7 +93,14 @@ function runDaemon() {
     else if (m.op === 'hello') log('App verbunden: ' + m.id + ' ' + m.version);
     else if (m.op === 'diag') {
       let lines;
-      try { const r = E.probeAudio(); log('Diagnose: ' + JSON.stringify(r)); lines = scanLines(engine.status()).concat(E.diagLines(r, [])); } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
+      try {
+        const sx = E.probeSmartx();
+        engine.smartx = sx;
+        log('SmartX: ' + JSON.stringify(sx));
+        const r = E.probeAudio();
+        log('Diagnose: ' + JSON.stringify(r));
+        lines = E.smartxLines(sx).concat(['--- Allgemein (root) ---'], E.diagLines(r, []));
+      } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
       const msg = JSON.stringify({ op: 'diag', lines: lines }) + '\n';
       clients.forEach(function (c) { try { c.write(msg); } catch (e) { /* egal */ } });
     }

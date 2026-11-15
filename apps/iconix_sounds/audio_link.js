@@ -147,20 +147,23 @@ class AudioLink extends EventEmitter {
       if (ds.scan) {
         let n = 0;
         head.push('ALSA-Geräte (Nummer = Einstellung "Gerät N"):');
-        ds.scan.forEach(x => head.push(x.ok ? '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen' : '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '')));
+        ds.scan.forEach(x => head.push(x.ok ? '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen'
+          : x.silent ? '  -  ' + x.name + ' – stumm (verwirft den Ton)'
+          : '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '')));
+        if (!n) head.push('  (kein hörbares Gerät frei – Details zum BMW-Audiosystem folgen)');
       } else head.push('ALSA-Scan: ' + (ds.scanError || 'läuft noch …'));
       head.push('"Geräte testen" spielt den Testsound auf jedem Gerät 1), 2), ... je 4 s');
     }
-    head.push('--- Sicht der App ---');
-    let r;
-    try { r = E.probeAudio(); } catch (e) { return head.concat(['Diagnose fehlgeschlagen: ' + e.message]); }
-    try { this.log.info('iconix: Audio-Diagnose (App) ' + JSON.stringify(r)); } catch (e) { /* egal */ }
-    let lines = E.diagLines(r, head);
+    // zuerst die Sicht des Dienstes (root, wichtiger), danach die der App
+    let lines = head.slice();
     if (this.connected) {
       if (ask !== false) this.send({ op: 'diag' });
-      lines = lines.concat(['--- Sicht des Dienstes (root) ---'], this.daemonDiag || ['(wird abgefragt ...)']);
+      lines = lines.concat(this.daemonDiag || ['(Dienst wird abgefragt ...)']);
     }
-    return lines;
+    let r;
+    try { r = E.probeAudio({ someip: !this.connected }); } catch (e) { return lines.concat(['Diagnose (App) fehlgeschlagen: ' + e.message]); }
+    try { this.log.info('iconix: Audio-Diagnose (App) ' + JSON.stringify(r)); } catch (e) { /* egal */ }
+    return lines.concat(E.diagLines(r, ['--- Sicht der App ---']));
   }
 
   _tick() {

@@ -132,7 +132,11 @@ function candidates(opts) {
   if (py && fs.existsSync(ALSA_SCRIPT) && (hasLibasound() || process.env.ICONIX_ALSA_FORCE)) {
     const dev = opts.device && opts.device !== 'auto' ? [opts.device] : AUTO_DEVICES;
     dev.forEach(function (d) {
-      out.push({ name: 'alsa:' + d, path: py, argv: [ALSA_SCRIPT, 'play', d, String(RATE), String(BUFFER_US)], device: d });
+      // "name@/pfad/zur/alsa.conf" = Gerät aus BMWs eigener ALSA-Konfiguration (ALSA_CONFIG_PATH)
+      const at = d.indexOf('@/');
+      const name = at > 0 ? d.slice(0, at) : d, cfg = at > 0 ? d.slice(at + 1) : null;
+      out.push({ name: 'alsa:' + d, path: py, argv: [ALSA_SCRIPT, 'play', name, String(RATE), String(BUFFER_US)], device: d,
+        env: cfg ? { ALSA_CONFIG_PATH: cfg } : null });
     });
   }
   BACKENDS.forEach(function (b) {
@@ -142,12 +146,18 @@ function candidates(opts) {
   return out;
 }
 
-/** ALSA-Geräte auflisten und testweise öffnen (Python-Skript "list"). cb(err, { devices: [...] }) */
-function scanAlsa(cb) {
+/**
+ * ALSA-Geräte auflisten und testweise öffnen (Python-Skript "list").
+ * extra: zusätzliche Gerätenamen (z. B. aus BMWs ALSA-Konfiguration); cfg: ALSA_CONFIG_PATH oder null.
+ * cb(err, { devices: [{ name, desc, ok, silent, error }] })
+ */
+function scanAlsa(extra, cfg, cb) {
+  if (typeof extra === 'function') { cb = extra; extra = []; cfg = null; }
   const py = findPython();
   if (!py) return cb(new Error('kein Python gefunden'));
   if (!fs.existsSync(ALSA_SCRIPT)) return cb(new Error('alsa_play.py fehlt'));
-  cp.execFile(py, [ALSA_SCRIPT, 'list'], { timeout: 20000, maxBuffer: 1 << 20 }, function (e, stdout, stderr) {
+  const env = cfg ? Object.assign({}, process.env, { ALSA_CONFIG_PATH: cfg }) : process.env;
+  cp.execFile(py, [ALSA_SCRIPT, 'list'].concat(extra || []), { timeout: 30000, maxBuffer: 1 << 20, env: env }, function (e, stdout, stderr) {
     let res = null;
     try { res = JSON.parse(String(stdout).trim().split('\n').pop()); } catch (x) { res = null; }
     if (!res) return cb(new Error((e && e.message) || String(stderr).trim().slice(0, 160) || 'keine Antwort'));
@@ -184,7 +194,7 @@ Output.prototype.start = function () {
   log('starte ' + b.name + ' ' + b.path + ' ' + b.argv.join(' '));
   let child;
   try {
-    child = cp.spawn(b.path, b.argv, { stdio: ['pipe', 'ignore', 'pipe'] });
+    child = cp.spawn(b.path, b.argv, { stdio: ['pipe', 'ignore', 'pipe'], env: b.env ? Object.assign({}, process.env, b.env) : process.env });
   } catch (e) {
     this.bad[b.name] = true; this.lastErr = e.message; this.onState();
     return false;
@@ -273,6 +283,12 @@ function sweepAt(t, cfg) {
   return { rpm: 3500 - (3500 - idle) * x, load: 0, speed: 120 * (1 - x), overrun: x < 0.9 };
 }
 
+// Geräte, die sich öffnen lassen und nicht stumm sind ("null" schluckt den Ton)
+function isSilent(d) { return !!d.silent || /^null(@|:|$)/.test(d.name); }
+function usable(scan) {
+  return ((scan && scan.devices) || []).filter(function (x) { return x.ok && !isSilent(x); });
+}
+
 // ---------------------------------------------------------------------------
 // Engine: Synth + Ausgabe + Taktgeber
 // ---------------------------------------------------------------------------
@@ -305,7 +321,7 @@ Engine.prototype.configure = function (cfg) {
 Engine.prototype._resolve = function (d) {
   const m = /^scan(\d+)$/.exec(d || '');
   if (!m) return d || 'auto';
-  const ok = ((this.scan && this.scan.devices) || []).filter(function (x) { return x.ok; });
+  const ok = usable(this.scan);
   const hit = ok[Number(m[1]) - 1];
   return hit ? hit.name : 'auto';
 };
@@ -323,21 +339,41 @@ Engine.prototype.setDevice = function (d) {
 
 Engine.prototype.scanDevices = function (cb) {
   const self = this;
-  scanAlsa(function (e, res) {
-    self.scan = e ? { devices: [], error: e.message } : res;
+  let sx = null;
+  try { sx = probeSmartx(); } catch (e) { sx = null; }
+  this.smartx = sx;
+  const extra = sx ? sx.pcmNames : [];
+  // Durchläufe: normale ALSA-Konfiguration, dann jede ALSA_CONFIG_PATH der BMW-Audio-Prozesse
+  const runs = [null].concat(sx ? sx.alsaConfigEnv : []);
+  const all = [];
+  let firstErr = null;
+  const next = function (i) {
+    if (i >= runs.length) return done();
+    scanAlsa(extra, runs[i], function (err, res) {
+      if (err) { if (!firstErr) firstErr = err.message; }
+      else (res.devices || []).forEach(function (d) {
+        if (runs[i]) d.name = d.name + '@' + runs[i];
+        all.push(d);
+      });
+      next(i + 1);
+    });
+  };
+  const done = function () {
+    self.scan = all.length ? { devices: all } : { devices: [], error: firstErr || 'keine Geräte' };
     self.log('ALSA-Scan: ' + JSON.stringify(self.scan));
     // ein Gerät "scanN" erst jetzt auflösbar
     if (/^scan/.test(self.device)) self.setDevice(self.device);
     self._changed();
     if (cb) cb(self.scan);
-  });
+  };
+  next(0);
 };
 
 /** Spielt den Testsound nacheinander auf jedem Gerät, das sich öffnen ließ (je 4 s). */
 Engine.prototype.testDevices = function () {
   const self = this;
   const run = function () {
-    const list = ((self.scan && self.scan.devices) || []).filter(function (x) { return x.ok; }).map(function (x) { return x.name; });
+    const list = usable(self.scan).map(function (x) { return x.name; });
     if (!list.length) { self.log('Gerätetest: kein Gerät ließ sich öffnen'); self._changed(); return; }
     self.devTest = { list: list, i: -1, prev: self.device };
     self._nextTestDevice();
@@ -380,7 +416,7 @@ Engine.prototype.status = function () {
     underruns: out.underruns || 0, late: this.late, leadMs: LEAD_MS,
     players: out.list.map(function (b) { return b.name; }),
     device: this.device, python: findPython(),
-    scan: this.scan ? (this.scan.devices || []).map(function (d) { return { name: d.name, ok: d.ok, error: d.error }; }) : null,
+    scan: this.scan ? (this.scan.devices || []).map(function (d) { return { name: d.name, ok: d.ok && !isSilent(d), silent: isSilent(d), error: d.error }; }) : null,
     scanError: this.scan && this.scan.error,
     devTest: this.devTest ? { device: this.devTest.list[this.devTest.i], i: this.devTest.i + 1, n: this.devTest.list.length } : null
   };
@@ -500,6 +536,125 @@ function probeAudio(opts) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// SmartX-/ALSA-Erkundung (sinnvoll als root): Wer hält die Soundkarte, welche virtuellen
+// Geräte definiert BMW (Intel IAS SmartX), mit welcher ALSA-Konfiguration arbeiten die Audio-Prozesse?
+// ---------------------------------------------------------------------------
+const AUDIO_PROC_RE = /^(AlsaRoutingAdap|AudioManager|mediaengine|mediaapp|avb_streamhandl|AVBSourceSinkCo|handsfreeaudio|smartx|ias)/i;
+const PCM_NAME_RE = /^[ \t]*pcm\.!?"?([A-Za-z0-9_.-]+)"?\s*[{=]/gm;
+
+function probeSmartx() {
+  const ls = function (d) { try { return fs.readdirSync(d); } catch (e) { return null; } };
+  const read = function (f, n) { try { return fs.readFileSync(f, 'utf8').slice(0, n || 200000); } catch (e) { return null; } };
+  const uniq = function (a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); };
+  const r = { owners: [], configs: [], pcmNames: [], plugins: [], files: [], shm: [], sockets: [], procs: [], alsaConfigPaths: [], alsaConfigEnv: [] };
+
+  // 1) Wer hält welches PCM-Gerät? (/proc/asound/card0/pcmXp/sub0/status: owner_pid)
+  (ls('/proc/asound/card0') || []).filter(function (n) { return /^pcm\d+[pc]$/.test(n); }).forEach(function (n) {
+    const st = read('/proc/asound/card0/' + n + '/sub0/status', 2000) || '';
+    const hw = read('/proc/asound/card0/' + n + '/sub0/hw_params', 2000) || '';
+    const info = read('/proc/asound/card0/' + n + '/info', 2000) || '';
+    const pid = (/owner_pid\s*:\s*(\d+)/.exec(st) || [])[1];
+    const comm = pid ? (read('/proc/' + pid + '/comm', 64) || '').trim() : '';
+    const name = (/^name:\s*(.*)$/m.exec(info) || [])[1] || '';
+    const rate = (/^rate:\s*(\d+)/m.exec(hw) || [])[1];
+    const fmt = (/^format:\s*(\S+)/m.exec(hw) || [])[1];
+    const ch = (/^channels:\s*(\d+)/m.exec(hw) || [])[1];
+    r.owners.push(n + (name ? ' "' + name.trim() + '"' : '') + ': ' + (pid ? 'belegt von ' + comm + ' (' + pid + ')' : (/closed/.test(st) ? 'frei' : st.split('\n')[0].trim() || '?')) +
+      (rate ? ' ' + rate + ' Hz ' + (fmt || '') + ' ' + (ch || '') + 'ch' : ''));
+  });
+
+  // 2) ALSA-Konfiguration und Plugins
+  const cfgFiles = ['/etc/asound.conf', '/usr/share/alsa/alsa.conf'];
+  ['/usr/share/alsa/alsa.conf.d', '/etc/alsa/conf.d', '/etc/alsa', '/usr/share/alsa/pcm', '/usr/share/alsa/cards'].forEach(function (d) {
+    (ls(d) || []).forEach(function (n) { if (/\.conf$/.test(n)) cfgFiles.push(path.join(d, n)); });
+  });
+  ['/usr/lib/alsa-lib', '/usr/lib64/alsa-lib', '/usr/lib/x86_64-linux-gnu/alsa-lib', '/lib/alsa-lib'].forEach(function (d) {
+    (ls(d) || []).forEach(function (n) { r.plugins.push(n.replace(/^libasound_module_/, '').replace(/\.so$/, '')); });
+  });
+
+  // 3) Dateien mit SmartX/IAS/Audio-Bezug in /etc, /opt, /usr/share (2 Ebenen), Shared Memory, Sockets
+  const FILE_RE = /(smartx|ias[_-]|audio|asound|routing|alsa)/i;
+  ['/etc', '/opt', '/usr/share', '/var/opt', '/mnt/dataro/data'].forEach(function (d) {
+    (ls(d) || []).forEach(function (n) {
+      const p = path.join(d, n);
+      if (FILE_RE.test(n)) r.files.push(p);
+      if (/^(smartx|ias|audio|alsa)/i.test(n)) (ls(p) || []).slice(0, 30).forEach(function (m) { r.files.push(path.join(p, m)); });
+    });
+  });
+  r.files = uniq(r.files).slice(0, 80);
+  r.files.filter(function (f) { return /\.(conf|cfg)$/i.test(f) && /asound|alsa|smartx|ias/i.test(f); }).forEach(function (f) { cfgFiles.push(f); });
+  r.shm = (ls('/dev/shm') || []).filter(function (n) { return /(smartx|ias|audio|alsa|pcm|avb|sound)/i.test(n); }).slice(0, 40);
+  ['/run', '/tmp', '/var/run', '/run/ias', '/run/smartx', '/tmp/smartx'].forEach(function (d) {
+    (ls(d) || []).forEach(function (n) { if (/(smartx|ias|audio|alsa|avb|sound)/i.test(n)) r.sockets.push(path.join(d, n)); });
+  });
+  r.sockets = uniq(r.sockets).slice(0, 40);
+
+  // 4) Audio-Prozesse: Startbefehl, ALSA-/SmartX-Umgebung, offene Audio-Dateien
+  (ls('/proc') || []).forEach(function (pid) {
+    if (!/^\d+$/.test(pid)) return;
+    const comm = (read('/proc/' + pid + '/comm', 64) || '').trim();
+    if (!AUDIO_PROC_RE.test(comm)) return;
+    const cmd = (read('/proc/' + pid + '/cmdline', 2000) || '').split('\0').filter(Boolean).join(' ');
+    const env = (read('/proc/' + pid + '/environ', 20000) || '').split('\0')
+      .filter(function (e) { return /^(ALSA_|SMARTX|IAS|AUDIO|LD_LIBRARY_PATH|AM_)/i.test(e); });
+    env.forEach(function (e) {
+      const m = /^ALSA_CONFIG_PATH=(.+)$/.exec(e);
+      if (m) {
+        r.alsaConfigEnv.push(m[1]);
+        m[1].split(':').forEach(function (p) { if (p) { r.alsaConfigPaths.push(p); cfgFiles.push(p); } });
+      }
+    });
+    const fds = [];
+    (ls('/proc/' + pid + '/fd') || []).forEach(function (fd) {
+      let t = null;
+      try { t = fs.readlinkSync('/proc/' + pid + '/fd/' + fd); } catch (e) { t = null; }
+      if (t && /(\/dev\/snd|\/dev\/shm|smartx|ias|asound|socket:)/.test(t) && !/^socket:/.test(t)) fds.push(t);
+    });
+    r.procs.push({ pid: pid, comm: comm, cmd: cmd.slice(0, 300), env: env.slice(0, 10), fds: uniq(fds).slice(0, 20) });
+  });
+  r.alsaConfigPaths = uniq(r.alsaConfigPaths);
+  r.alsaConfigEnv = uniq(r.alsaConfigEnv);
+
+  // 5) pcm-Namen aus allen gefundenen Konfigurationen
+  const names = [];
+  uniq(cfgFiles).forEach(function (f) {
+    const txt = read(f);
+    if (!txt) return;
+    r.configs.push(f);
+    let m;
+    PCM_NAME_RE.lastIndex = 0;
+    while ((m = PCM_NAME_RE.exec(txt)) && names.length < 200) names.push(m[1]);
+  });
+  r.pcmNames = uniq(names).filter(function (n) { return !/^(front|rear|center_lfe|side|surround\d+|iec958|spdif|modem|phoneline|hdmi|dsnoop|null)$/.test(n); }).slice(0, 60);
+  return r;
+}
+
+function smartxLines(r) {
+  const out = [];
+  const add = function (label, val) {
+    let s = label + ': ' + val;
+    while (s.length > 68) { const cut = s.lastIndexOf(', ', 68); const i = cut > 20 ? cut + 1 : 68; out.push(s.slice(0, i)); s = '   ' + s.slice(i).replace(/^\s+/, ''); }
+    out.push(s);
+  };
+  const list = function (a) { return a && a.length ? a.join(', ') : 'keine'; };
+  out.push('--- BMW-Audiosystem (SmartX) ---');
+  r.owners.forEach(function (o) { add('PCM', o); });
+  add('ALSA-Konfig', list(r.configs));
+  add('pcm-Namen', list(r.pcmNames));
+  add('ALSA-Plugins', list(r.plugins));
+  if (r.alsaConfigPaths.length) add('ALSA_CONFIG_PATH', list(r.alsaConfigPaths));
+  add('Shared Memory', list(r.shm));
+  add('Sockets', list(r.sockets));
+  r.procs.forEach(function (p) {
+    add(p.comm + ' (' + p.pid + ')', p.cmd || '-');
+    if (p.env.length) add('   Umgebung', list(p.env));
+    if (p.fds.length) add('   offen', list(p.fds));
+  });
+  add('Dateien', list(r.files));
+  return out;
+}
+
 /** Kurze Textzeilen für die Anzeige (ASCII, max. ~68 Zeichen). */
 function diagLines(r, extra) {
   const out = [];
@@ -526,6 +681,7 @@ function diagLines(r, extra) {
 
 module.exports = {
   probeAudio: probeAudio, diagLines: diagLines, scanAlsa: scanAlsa, findPython: findPython,
+  probeSmartx: probeSmartx, smartxLines: smartxLines, usable: usable,
   Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, sweepAt: sweepAt,
   RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };
