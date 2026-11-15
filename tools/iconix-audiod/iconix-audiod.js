@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
@@ -77,6 +77,12 @@ function runDaemon() {
     else if (m.op === 'config') { engine.configure(m.cfg); }
     else if (m.op === 'test') { log('Testsound'); engine.test(); }
     else if (m.op === 'hello') log('App verbunden: ' + m.id + ' ' + m.version);
+    else if (m.op === 'diag') {
+      let lines;
+      try { const r = E.probeAudio(); log('Diagnose: ' + JSON.stringify(r)); lines = E.diagLines(r, []); } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
+      const msg = JSON.stringify({ op: 'diag', lines: lines }) + '\n';
+      clients.forEach(function (c) { try { c.write(msg); } catch (e) { /* egal */ } });
+    }
   }
 
   function listen(p) {

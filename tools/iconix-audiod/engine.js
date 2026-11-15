@@ -49,6 +49,18 @@ const BACKENDS = [
     args: function (r) { return ['--playback', '--format', 's16', '--rate', String(r), '--channels', '2', '-']; }
   },
   {
+    name: 'paplay', bin: 'paplay',
+    args: function (r) { return ['--raw', '--format=s16le', '--rate=' + r, '--channels=2', '--latency-msec=' + Math.round(BUFFER_US / 1000)]; }
+  },
+  {
+    name: 'sox', bin: 'play',
+    args: function (r) { return ['-q', '-t', 'raw', '-r', String(r), '-e', 'signed', '-b', '16', '-c', '2', '-']; }
+  },
+  {
+    name: 'ffplay', bin: 'ffplay',
+    args: function (r) { return ['-nodisp', '-loglevel', 'error', '-f', 's16le', '-ar', String(r), '-ac', '2', '-i', '-']; }
+  },
+  {
     name: 'gstreamer', bin: 'gst-launch-1.0',
     args: function (r) {
       return ['-q', 'fdsrc', 'fd=0', '!', 'rawaudioparse', 'format=pcm', 'pcm-format=s16le',
@@ -98,7 +110,7 @@ function Output(onState, log) {
   this.backend = null;
   this.blocked = false;
   this.underruns = 0;
-  this.error = this.list.length ? null : 'kein Abspielprogramm gefunden (aplay/pacat/pw-cat/gst)';
+  this.error = this.list.length ? null : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose';
   this.lastErr = '';
 }
 
@@ -229,7 +241,7 @@ Engine.prototype.test = function () {
   // nach einem Fehler beim Testsound alle Abspielprogramme erneut probieren
   this.out.bad = {};
   this.out.list = candidates();
-  this.out.error = this.out.list.length ? null : 'kein Abspielprogramm gefunden (aplay/pacat/pw-cat/gst)';
+  this.out.error = this.out.list.length ? null : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose';
   this._changed();
 };
 
@@ -297,7 +309,89 @@ Engine.prototype._tick = function () {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Audio-Diagnose: was gibt es auf diesem Gerät, um Ton auszugeben?
+// (aus Sicht des aufrufenden Prozesses – App ohne Root bzw. Dienst als root)
+// ---------------------------------------------------------------------------
+const AUDIO_RE = /(^a?play|^paplay|^ffplay|audio|snd|alsa|pcm|pulse|pipewire|^gst|tinyalsa|tinyplay|tinymix|avb|sound|mixer|gong|chime|speaker|mediaengine|mediaapp)/i;
+
+function probeAudio(opts) {
+  opts = opts || {};
+  const ls = function (d) { try { return fs.readdirSync(d); } catch (e) { return null; } };
+  const read = function (f, n) { try { return fs.readFileSync(f, 'utf8').slice(0, n || 4000); } catch (e) { return null; } };
+  const can = function (p, mode) { try { fs.accessSync(p, mode); return true; } catch (e) { return false; } };
+  const uniq = function (a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); };
+  const r = { at: Date.now() };
+  r.uid = process.getuid ? process.getuid() : null;
+  r.players = candidates().map(function (b) { return b.name + ' ' + b.path; });
+  // ALSA-Geräte im Kernel
+  r.devSnd = ls('/dev/snd');
+  r.devSndWritable = (r.devSnd || []).filter(function (n) { return /^pcm.*p$/.test(n) && can('/dev/snd/' + n, fs.constants.W_OK); });
+  r.cards = read('/proc/asound/cards', 1500);
+  r.pcm = read('/proc/asound/pcm', 1500);
+  // OSS-Emulation: dorthin könnte Node ohne Abspielprogramm direkt schreiben
+  r.oss = ['/dev/dsp', '/dev/dsp0', '/dev/audio'].filter(function (p) { return fs.existsSync(p); })
+    .map(function (p) { return p + (can(p, fs.constants.W_OK) ? ' (schreibbar)' : ' (kein Zugriff)'); });
+  // Bibliotheken
+  const libs = [];
+  ['/usr/lib', '/lib', '/usr/lib64', '/lib64', '/usr/lib/x86_64-linux-gnu'].forEach(function (d) {
+    (ls(d) || []).forEach(function (n) { if (/^lib(asound|pulse|pipewire|tinyalsa|gstreamer|avb|ias)/i.test(n)) libs.push(n); });
+  });
+  r.libs = uniq(libs).slice(0, 30);
+  // Programme mit Audio-Bezug
+  const bins = [];
+  (process.env.PATH || '').split(path.delimiter).concat(['/usr/bin', '/bin', '/usr/sbin', '/sbin', '/usr/local/bin', '/opt/bin'])
+    .forEach(function (d) { if (d) (ls(d) || []).forEach(function (n) { if (AUDIO_RE.test(n)) bins.push(n); }); });
+  r.bins = uniq(bins).sort().slice(0, 60);
+  // laufende Prozesse mit Audio-Bezug
+  const procs = [];
+  (ls('/proc') || []).forEach(function (p) {
+    if (!/^\d+$/.test(p)) return;
+    const c = read('/proc/' + p + '/comm', 64);
+    if (c && AUDIO_RE.test(c)) procs.push(c.trim());
+  });
+  r.procs = uniq(procs).sort().slice(0, 40);
+  // BMW-SOME/IP-Schnittstellen mit Audio-Bezug (Katalog des Geräts)
+  if (opts.someip !== false) {
+    const cat = process.env.MGU_SOMEIP_CATALOG || '/etc/oap/someip/someip-interfaces.json';
+    let txt = null;
+    try { txt = fs.readFileSync(cat, 'utf8'); } catch (e) { r.someipError = e.code || String(e); }
+    if (txt) {
+      const re = /"(de\.bmw\.[A-Za-z0-9_.]*?(?:[Aa]udio|[Ss]ound|[Gg]ong|[Cc]hime|[Tt]one|ASD|[Aa]coustic|[Vv]olume|[Ss]peaker)[A-Za-z0-9_.]*)"/g;
+      const names = [];
+      let m;
+      while ((m = re.exec(txt)) && names.length < 400) names.push(m[1]);
+      r.someip = uniq(names).sort().slice(0, 60);
+    }
+  }
+  return r;
+}
+
+/** Kurze Textzeilen für die Anzeige (ASCII, max. ~68 Zeichen). */
+function diagLines(r, extra) {
+  const out = [];
+  const add = function (label, val) {
+    let s = label + ': ' + val;
+    while (s.length > 68) { const cut = s.lastIndexOf(', ', 68); const i = cut > 20 ? cut + 1 : 68; out.push(s.slice(0, i)); s = '   ' + s.slice(i).replace(/^\s+/, ''); }
+    out.push(s);
+  };
+  const list = function (a, none) { return a && a.length ? a.join(', ') : (none || 'keine'); };
+  (extra || []).forEach(function (l) { out.push(l); });
+  add('Nutzer', r.uid === 0 ? 'root' : 'uid ' + r.uid);
+  add('Abspielprogramme', list(r.players));
+  add('/dev/snd', r.devSnd ? list(r.devSnd) : 'fehlt');
+  if (r.devSnd) add('beschreibbar', list(r.devSndWritable));
+  if (r.cards) add('Soundkarten', r.cards.split('\n').filter(function (l) { return /^\s*\d+ \[/.test(l); }).map(function (l) { return l.trim(); }).join(' | ') || r.cards.trim().slice(0, 60));
+  add('OSS', list(r.oss));
+  add('Bibliotheken', list(r.libs));
+  add('Programme', list(r.bins));
+  add('Prozesse', list(r.procs));
+  add('SOME/IP', r.someip ? list(r.someip.map(function (n) { return n.replace(/^de\.bmw\.(infotainment\.|infrastructure\.)?/, ''); })) : 'nicht lesbar (' + (r.someipError || '?') + ')');
+  return out;
+}
+
 module.exports = {
+  probeAudio: probeAudio, diagLines: diagLines,
   Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, sweepAt: sweepAt,
   RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };

@@ -44,8 +44,16 @@
     out.push({ key: 'mute', act: 'mute', arg: null, x: X1 - 230, y: VY - 40, w: 230, h: 44, r: 10 });
     return out;
   }
-  function hitAt(profiles, x, y) {
-    var h = hits(profiles);
+  // Diagnose-Ansicht: Weiter / Schließen
+  var DIAG_LINES = 12;
+  function hitsDiag() {
+    return [
+      { key: 'diag-next', act: 'diagNext', arg: null, x: X1 - 470, y: 452, w: 220, h: 52, r: 14 },
+      { key: 'diag-close', act: 'diagClose', arg: null, x: X1 - 230, y: 452, w: 230, h: 52, r: 14 }
+    ];
+  }
+  function hitAt(profiles, x, y, diag) {
+    var h = diag ? hitsDiag() : hits(profiles);
     for (var i = 0; i < h.length; i++) if (x >= h[i].x && x <= h[i].x + h[i].w && y >= h[i].y && y <= h[i].y + h[i].h) return h[i];
     return null;
   }
@@ -76,8 +84,10 @@
     g.text('U/min', cx, cy + 58, 30, C.dim, 'center', false);
     g.text(Math.round(s.speed || 0) + ' km/h', cx, cy + 150, 40, C.text, 'center', true);
 
-    // ---- Profil -------------------------------------------------------
     var x0 = X0, x1 = X1;
+    if (s.diag) { drawDiag(g, s); if (s.hint) g.text(s.hint, cx, 505, 22, C.dim, 'center', false); return; }
+
+    // ---- Profil -------------------------------------------------------
     g.text('ICONIX SOUNDS', x0, 70, 26, C.dim, 'left', true);
     var cur = null, i;
     for (i = 0; i < s.profiles.length; i++) if (s.profiles[i].id === s.profile) cur = s.profiles[i];
@@ -131,5 +141,21 @@
     if (s.hint) g.text(s.hint, cx, 505, 22, C.dim, 'center', false);
   }
 
-  return { W: W, H: H, colors: C, draw: draw, hits: hits, hitAt: hitAt };
+  // s.diag = { lines: [...], page: 0 }
+  function drawDiag(g, s) {
+    var d = s.diag, pages = Math.max(1, Math.ceil(d.lines.length / DIAG_LINES));
+    var page = ((d.page || 0) % pages + pages) % pages;
+    g.rrect(X0 - 20, 30, X1 - X0 + 40, 480, 18, C.panel);
+    g.text('AUDIO-DIAGNOSE', X0, 70, 26, C.accent2, 'left', true);
+    g.text('Seite ' + (page + 1) + '/' + pages, X1, 70, 22, C.dim, 'right', false);
+    var ls = d.lines.slice(page * DIAG_LINES, page * DIAG_LINES + DIAG_LINES);
+    for (var i = 0; i < ls.length; i++) g.text(ls[i], X0, 110 + i * 28, 22, i === 0 && page === 0 ? C.text : C.dim, 'left', false);
+    var b = hitsDiag();
+    g.rrect(b[0].x, b[0].y, b[0].w, b[0].h, b[0].r, C.track);
+    g.text('Weiter', b[0].x + b[0].w / 2, b[0].y + 35, 24, C.text, 'center', true);
+    g.rrect(b[1].x, b[1].y, b[1].w, b[1].h, b[1].r, C.accent);
+    g.text('Schliessen', b[1].x + b[1].w / 2, b[1].y + 35, 24, '#ffffff', 'center', true);
+  }
+
+  return { W: W, H: H, colors: C, draw: draw, hits: hits, hitsDiag: hitsDiag, hitAt: hitAt, DIAG_LINES: DIAG_LINES };
 });

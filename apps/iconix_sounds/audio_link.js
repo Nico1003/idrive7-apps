@@ -126,6 +126,25 @@ class AudioLink extends EventEmitter {
     return false;
   }
 
+  /**
+   * Audio-Diagnose als Textzeilen: Sicht der App (ohne Root) und – falls verbunden – des Dienstes (root).
+   * Die Antwort des Dienstes kommt asynchron und wird bei erneutem Aufruf angehängt.
+   */
+  diagnose(ask) {
+    let E;
+    try { E = require('./engine'); } catch (e) { return ['engine.js fehlt: ' + e.message]; }
+    const head = ['Status: ' + this.status.text, 'Dienst: ' + (this.connected ? 'verbunden' : this._why()), '--- Sicht der App ---'];
+    let r;
+    try { r = E.probeAudio(); } catch (e) { return head.concat(['Diagnose fehlgeschlagen: ' + e.message]); }
+    try { this.log.info('iconix: Audio-Diagnose (App) ' + JSON.stringify(r)); } catch (e) { /* egal */ }
+    let lines = E.diagLines(r, head);
+    if (this.connected) {
+      if (ask !== false) this.send({ op: 'diag' });
+      lines = lines.concat(['--- Sicht des Dienstes (root) ---'], this.daemonDiag || ['(wird abgefragt ...)']);
+    }
+    return lines;
+  }
+
   _tick() {
     const p = this.latest;
     const now = Date.now();
@@ -185,6 +204,7 @@ class AudioLink extends EventEmitter {
   _onMessage(line) {
     let m;
     try { m = JSON.parse(line); } catch (e) { return; }
+    if (m.op === 'diag' && Array.isArray(m.lines)) { this.daemonDiag = m.lines; this.emit('diag', m.lines); return; }
     if (m.op !== 'status') return;
     this.daemonStatus = m;
     this._update();

@@ -19,7 +19,7 @@ const UI = require('./ui');
 const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, pops: false, sport: false,
   muteParked: false, dialVolume: true, loadSource: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
@@ -175,13 +175,22 @@ mgu.run({
     ctx.ui.onClick('BTN_PROFILE', nextProfile);
     ctx.ui.onClick('BTN_MUTE', () => set('enabled', !bool(get('enabled'))));
     ctx.ui.onClick('BTN_TEST', () => c.link.test());
+    // Audio-Diagnose: zeigt, welche Tonwege es auf diesem Head Unit gibt (an-/ausschalten)
+    let diag = null;
+    const openDiag = () => { diag = { lines: c.link.diagnose(), page: 0 }; };
+    ctx.ui.onClick('BTN_DIAG', () => { if (diag) diag = null; else openDiag(); });
+    // Antwort des Dienstes (root) nachreichen
+    c.link.on('diag', () => { if (diag) diag.lines = c.link.diagnose(false); });
 
     // Bedienbare Flächen (Profil-Chips, Lautstärke −/+, Stumm) – Geometrie aus ui.js
     const act = h => {
       if (h.act === 'profile') set('profile', h.arg);
       else if (h.act === 'vol') changeVolume(h.arg);
       else if (h.act === 'mute') set('enabled', !bool(get('enabled')));
+      else if (h.act === 'diagNext' && diag) diag.page++;
+      else if (h.act === 'diagClose') diag = null;
     };
+    const HITS_DIAG = UI.hitsDiag().map(h => Object.assign({ run: () => act(h) }, h));
     const HITS = UI.hits(Profiles.list).map(h => Object.assign({ run: () => act(h) }, h));
 
     // Zwei Betriebsarten des Kits (kit/runtime/display.js):
@@ -208,7 +217,7 @@ mgu.run({
     }
     // Rückfall: Tippen ohne Ziel (falls ein Kit-Stand Taps nur über onTap liefert)
     if (ctx.onTap) {
-      ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y); if (h) act(h); });
+      ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y, !!diag); if (h) act(h); });
     }
 
     // Bildschirm (wie apps/redline/main.js): pro Frame ctx.canvas(W, H) holen – das Kit gibt denselben,
@@ -233,10 +242,12 @@ mgu.run({
       st.sport = cfg.sport; st.pops = cfg.pops; st.demo = !s;
       st.audio = c.link.status;
       st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
+      st.diag = diag;
       UI.draw(g, st);
       // Ziele nach dem Zeichnen registrieren (wie apps/dyno, live_data: nur wenn cv.own)
       if (own && typeof cv.target === 'function') {
-        for (let i = 0; i < HITS.length; i++) { const h = HITS[i]; cv.target(h.x, h.y, h.w, h.h, h.run, h.key, h.r); }
+        const list = diag ? HITS_DIAG : HITS;
+        for (let i = 0; i < list.length; i++) { const h = list[i]; cv.target(h.x, h.y, h.w, h.h, h.run, h.key, h.r); }
       }
       return ctx.ui.image('MAIN_GFX', cv);
     });

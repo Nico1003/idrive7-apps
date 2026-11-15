@@ -2,7 +2,7 @@
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
   "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Die Tonausgabe übernimmt das Tool iconix-audiod (experimentell).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
@@ -36,6 +36,7 @@
         ["BTN_PROFILE", "Sound wechseln"],
         ["BTN_MUTE", "Stumm / Ton an"],
         ["BTN_TEST", "Testsound"],
+        ["BTN_DIAG", "Audio-Diagnose"],
         ["BTN_SETTINGS", "Einstellungen"]
       ]
     }
