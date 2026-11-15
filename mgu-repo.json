@@ -2,7 +2,7 @@
   "schema": 1,
   "apps": {
     "path": "apps/*",
-    "exclude": ["ambient_config", "brake_test", "car_vitals", "doom", "draggy", "dtc_scanner", "dyno", "edrive", "gforce", "live_adjustments", "live_data", "redline", "service", "warmup", "zf8hp"],
+    "exclude": ["ambient_config", "brake_test", "car_vitals", "doom", "draggy", "dtc_scanner", "dyno", "edrive", "gforce", "live_adjustments", "live_data", "redline", "service", "warmup", "zf8hp", "iconix_sounds"],
     "manifest": "app.json",
     "icon": "icon.png",
     "build": {
