@@ -31,11 +31,21 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
 const STATUS_FILE = process.env.ICONIX_STATUS_FILE || '/tmp/iconix-audiod.json';
+
+// ALSA-Scan als nummerierte Zeilen (Nummer = Einstellung "Gerät N")
+function scanLines(st) {
+  if (!st.scan) return [st.scanError ? 'ALSA-Scan: ' + st.scanError : 'ALSA-Scan: läuft noch …'];
+  if (!st.scan.length) return ['ALSA-Scan: keine Geräte' + (st.scanError ? ' (' + st.scanError + ')' : '')];
+  let n = 0;
+  return ['ALSA-Geräte (Nummer = Einstellung "Gerät N"):'].concat(st.scan.map(function (x) {
+    return x.ok ? '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen' : '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '');
+  }));
+}
 
 function log(msg) { console.log(new Date().toISOString() + ' iconix-audiod: ' + msg); }
 
@@ -76,10 +86,12 @@ function runDaemon() {
     if (m.op === 'params') engine.params(m);
     else if (m.op === 'config') { engine.configure(m.cfg); }
     else if (m.op === 'test') { log('Testsound'); engine.test(); }
+    else if (m.op === 'scan') { log('ALSA-Scan'); engine.scanDevices(function () { broadcast(false); }); }
+    else if (m.op === 'testdevices') { log('Gerätetest'); engine.testDevices(); }
     else if (m.op === 'hello') log('App verbunden: ' + m.id + ' ' + m.version);
     else if (m.op === 'diag') {
       let lines;
-      try { const r = E.probeAudio(); log('Diagnose: ' + JSON.stringify(r)); lines = E.diagLines(r, []); } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
+      try { const r = E.probeAudio(); log('Diagnose: ' + JSON.stringify(r)); lines = scanLines(engine.status()).concat(E.diagLines(r, [])); } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
       const msg = JSON.stringify({ op: 'diag', lines: lines }) + '\n';
       clients.forEach(function (c) { try { c.write(msg); } catch (e) { /* egal */ } });
     }
@@ -122,6 +134,8 @@ function runDaemon() {
 
   SOCKETS.forEach(listen);
   engine.start();
+  // ALSA-Geräte einmal beim Start prüfen (Python + libasound), Ergebnis steht in Status und Diagnose
+  setTimeout(function () { engine.scanDevices(function () { broadcast(false); }); }, 1500);
   const st = engine.status();
   log('Version ' + VERSION + ' – ' + (st.players.length ? 'Ausgabe: ' + st.players.join(', ') : st.error));
 

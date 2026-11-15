@@ -2,7 +2,7 @@
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
   "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Die Tonausgabe übernimmt das Tool iconix-audiod (experimentell).",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
@@ -128,6 +128,13 @@
       "label": "iDrive-Drehen = Lautstaerke",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "alsaDevice",
+      "label": "Ausgabegeraet",
+      "type": "choice",
+      "default": "auto",
+      "options": [["auto", "Automatisch"], ["default", "default"], ["plughw:0,0", "plughw:0,0"], ["plughw:0,1", "plughw:0,1"], ["scan1", "Geraet 1 (Diagnose)"], ["scan2", "Geraet 2 (Diagnose)"], ["scan3", "Geraet 3 (Diagnose)"], ["scan4", "Geraet 4 (Diagnose)"], ["scan5", "Geraet 5 (Diagnose)"], ["scan6", "Geraet 6 (Diagnose)"]]
     },
     {
       "key": "loadSource",

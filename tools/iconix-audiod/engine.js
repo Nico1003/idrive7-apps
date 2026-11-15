@@ -80,7 +80,43 @@ function findBin(bin) {
   return null;
 }
 
-function candidates() {
+// Python finden: PATH, dann die Store-Tools unter /var/opt (mgu-python bringt Python 3.12 mit)
+let pythonCache;
+function findPython() {
+  if (pythonCache !== undefined) return pythonCache;
+  pythonCache = null;
+  if (process.env.ICONIX_PYTHON) { pythonCache = process.env.ICONIX_PYTHON; return pythonCache; }
+  const names = ['python3', 'python3.12', 'python'];
+  for (let i = 0; i < names.length; i++) { const p = findBin(names[i]); if (p) { pythonCache = p; return p; } }
+  const rels = ['current/bin/python3', 'current/bin/python3.12', 'current/python3', 'current/python/bin/python3',
+    'current/usr/bin/python3', 'bin/python3'];
+  let dirs = [];
+  try { dirs = fs.readdirSync('/var/opt'); } catch (e) { dirs = []; }
+  dirs.sort(function (a, b) { return (/python/.test(b) ? 1 : 0) - (/python/.test(a) ? 1 : 0); });
+  for (let i = 0; i < dirs.length; i++) {
+    for (let j = 0; j < rels.length; j++) {
+      const p = path.join('/var/opt', dirs[i], rels[j]);
+      try { fs.accessSync(p, fs.constants.X_OK); pythonCache = p; return p; } catch (e) { /* weiter */ }
+    }
+  }
+  return null;
+}
+
+function hasLibasound() {
+  const dirs = ['/usr/lib', '/lib', '/usr/lib64', '/lib64', '/usr/lib/x86_64-linux-gnu'];
+  for (let i = 0; i < dirs.length; i++) { if (fs.existsSync(path.join(dirs[i], 'libasound.so.2'))) return true; }
+  return false;
+}
+
+const ALSA_SCRIPT = path.join(__dirname, 'alsa_play.py');
+// Geräte, die "auto" der Reihe nach probiert (das erste, das sich öffnen lässt, gewinnt)
+const AUTO_DEVICES = ['default', 'plughw:0,0', 'plughw:0,1'];
+
+/**
+ * Abspielwege in Reihenfolge. opts.device: ALSA-Gerät für den Python-Player ('auto' = AUTO_DEVICES).
+ */
+function candidates(opts) {
+  opts = opts || {};
   const out = [];
   if (process.env.ICONIX_PLAYER) {
     // "cmd arg arg" oder JSON-Array '["/pfad mit leerzeichen/cmd","arg"]'
@@ -91,6 +127,14 @@ function candidates() {
     parts = parts.map(function (s) { return String(s).replace('{rate}', String(RATE)); });
     out.push({ name: 'custom', path: parts[0], argv: parts.slice(1) });
   }
+  // ALSA über Python + ctypes (das Head Unit hat libasound und mgu-python, aber kein aplay)
+  const py = findPython();
+  if (py && fs.existsSync(ALSA_SCRIPT) && (hasLibasound() || process.env.ICONIX_ALSA_FORCE)) {
+    const dev = opts.device && opts.device !== 'auto' ? [opts.device] : AUTO_DEVICES;
+    dev.forEach(function (d) {
+      out.push({ name: 'alsa:' + d, path: py, argv: [ALSA_SCRIPT, 'play', d, String(RATE), String(BUFFER_US)], device: d });
+    });
+  }
   BACKENDS.forEach(function (b) {
     const p = findBin(b.bin);
     if (p) out.push({ name: b.name, path: p, argv: b.args(RATE) });
@@ -98,13 +142,27 @@ function candidates() {
   return out;
 }
 
+/** ALSA-Geräte auflisten und testweise öffnen (Python-Skript "list"). cb(err, { devices: [...] }) */
+function scanAlsa(cb) {
+  const py = findPython();
+  if (!py) return cb(new Error('kein Python gefunden'));
+  if (!fs.existsSync(ALSA_SCRIPT)) return cb(new Error('alsa_play.py fehlt'));
+  cp.execFile(py, [ALSA_SCRIPT, 'list'], { timeout: 20000, maxBuffer: 1 << 20 }, function (e, stdout, stderr) {
+    let res = null;
+    try { res = JSON.parse(String(stdout).trim().split('\n').pop()); } catch (x) { res = null; }
+    if (!res) return cb(new Error((e && e.message) || String(stderr).trim().slice(0, 160) || 'keine Antwort'));
+    cb(null, res);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // PCM-Ausgabe über ein Kindprozess-Abspielprogramm
 // ---------------------------------------------------------------------------
-function Output(onState, log) {
+function Output(onState, log, opts) {
   this.onState = onState || function () {};
   this.log = log || function () {};
-  this.list = candidates();
+  this.opts = opts || {};
+  this.list = candidates(this.opts);
   this.bad = {};
   this.child = null;
   this.backend = null;
@@ -224,7 +282,10 @@ function Engine(opts) {
   this.log = opts.log || function () {};
   this.onStatus = opts.onStatus || function () {};
   this.synth = new Synth(RATE);
-  this.out = new Output(function () { self._changed(); }, this.log);
+  this.device = opts.device || process.env.ICONIX_ALSA_DEVICE || 'auto';  // ALSA-Gerät oder 'auto' / 'scanN'
+  this.scan = null;      // Ergebnis von scanAlsa
+  this.devTest = null;   // laufender Gerätetest { list, i, until, prev }
+  this.out = new Output(function () { self._changed(); }, this.log, { device: this._resolve(this.device) });
   this.lastParams = 0;
   this.testUntil = 0; this.testStart = 0;
   this.silentSince = 0;
@@ -234,13 +295,78 @@ function Engine(opts) {
   this.timer = null;
 }
 
-Engine.prototype.configure = function (cfg) { this.synth.configure(cfg); this._changed(); };
+Engine.prototype.configure = function (cfg) {
+  this.synth.configure(cfg);
+  if (cfg && cfg.device && cfg.device !== this.device && !this.devTest) this.setDevice(cfg.device);
+  this._changed();
+};
+
+// 'scanN' = das N-te Gerät, das sich beim Scan öffnen ließ (so in der Diagnose nummeriert)
+Engine.prototype._resolve = function (d) {
+  const m = /^scan(\d+)$/.exec(d || '');
+  if (!m) return d || 'auto';
+  const ok = ((this.scan && this.scan.devices) || []).filter(function (x) { return x.ok; });
+  const hit = ok[Number(m[1]) - 1];
+  return hit ? hit.name : 'auto';
+};
+
+Engine.prototype.setDevice = function (d) {
+  const self = this;
+  this.device = d || 'auto';
+  const old = this.out;
+  this.out = new Output(function () { self._changed(); }, this.log, { device: this._resolve(this.device) });
+  this.out.underruns = old.underruns || 0;
+  old.stop();
+  this.log('Ausgabegerät: ' + this.device + ' -> ' + this._resolve(this.device));
+  this._changed();
+};
+
+Engine.prototype.scanDevices = function (cb) {
+  const self = this;
+  scanAlsa(function (e, res) {
+    self.scan = e ? { devices: [], error: e.message } : res;
+    self.log('ALSA-Scan: ' + JSON.stringify(self.scan));
+    // ein Gerät "scanN" erst jetzt auflösbar
+    if (/^scan/.test(self.device)) self.setDevice(self.device);
+    self._changed();
+    if (cb) cb(self.scan);
+  });
+};
+
+/** Spielt den Testsound nacheinander auf jedem Gerät, das sich öffnen ließ (je 4 s). */
+Engine.prototype.testDevices = function () {
+  const self = this;
+  const run = function () {
+    const list = ((self.scan && self.scan.devices) || []).filter(function (x) { return x.ok; }).map(function (x) { return x.name; });
+    if (!list.length) { self.log('Gerätetest: kein Gerät ließ sich öffnen'); self._changed(); return; }
+    self.devTest = { list: list, i: -1, prev: self.device };
+    self._nextTestDevice();
+  };
+  if (this.scan) run(); else this.scanDevices(run);
+};
+
+Engine.prototype._nextTestDevice = function () {
+  const t = this.devTest;
+  if (!t) return;
+  t.i++;
+  if (t.i >= t.list.length) {
+    const prev = t.prev;
+    this.devTest = null;
+    this.testUntil = 0;
+    this.setDevice(prev);
+    return;
+  }
+  this.setDevice(t.list[t.i]);
+  this.testStart = Date.now(); this.testUntil = this.testStart + 4000;
+  t.until = this.testUntil;
+  this._changed();
+};
 Engine.prototype.params = function (p) { this.synth.setParams(p); this.lastParams = Date.now(); };
 Engine.prototype.test = function () {
   this.testStart = Date.now(); this.testUntil = this.testStart + 9000;
   // nach einem Fehler beim Testsound alle Abspielprogramme erneut probieren
   this.out.bad = {};
-  this.out.list = candidates();
+  this.out.list = candidates({ device: this._resolve(this.device) });
   this.out.error = this.out.list.length ? null : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose';
   this._changed();
 };
@@ -252,7 +378,11 @@ Engine.prototype.status = function () {
     backend: out.backend || (out.list[0] && !out.error ? out.list[0].name : null),
     rate: RATE, playing: !!out.child, error: out.error, profile: this.synth.cfg.profile,
     underruns: out.underruns || 0, late: this.late, leadMs: LEAD_MS,
-    players: out.list.map(function (b) { return b.name; })
+    players: out.list.map(function (b) { return b.name; }),
+    device: this.device, python: findPython(),
+    scan: this.scan ? (this.scan.devices || []).map(function (d) { return { name: d.name, ok: d.ok, error: d.error }; }) : null,
+    scanError: this.scan && this.scan.error,
+    devTest: this.devTest ? { device: this.devTest.list[this.devTest.i], i: this.devTest.i + 1, n: this.devTest.list.length } : null
   };
 };
 
@@ -275,6 +405,7 @@ Engine.prototype._tick = function () {
   // zählt Wakeups, die so spät kamen, dass der Vorlauf aufgebraucht war
   if (out.child && now - this.lastTick > LEAD_MS) this.late++;
   this.lastTick = now;
+  if (this.devTest && now >= this.devTest.until) this._nextTestDevice();
   const testing = now < this.testUntil;
   if (testing) {
     synth.setParams(sweepAt((now - this.testStart) / 1000, synth.cfg));
@@ -324,6 +455,8 @@ function probeAudio(opts) {
   const r = { at: Date.now() };
   r.uid = process.getuid ? process.getuid() : null;
   r.players = candidates().map(function (b) { return b.name + ' ' + b.path; });
+  r.python = findPython();
+  r.alsaScript = fs.existsSync(ALSA_SCRIPT);
   // ALSA-Geräte im Kernel
   r.devSnd = ls('/dev/snd');
   r.devSndWritable = (r.devSnd || []).filter(function (n) { return /^pcm.*p$/.test(n) && can('/dev/snd/' + n, fs.constants.W_OK); });
@@ -379,6 +512,7 @@ function diagLines(r, extra) {
   (extra || []).forEach(function (l) { out.push(l); });
   add('Nutzer', r.uid === 0 ? 'root' : 'uid ' + r.uid);
   add('Abspielprogramme', list(r.players));
+  add('Python', (r.python || 'nicht gefunden') + (r.alsaScript ? ' · alsa_play.py da' : ' · alsa_play.py fehlt'));
   add('/dev/snd', r.devSnd ? list(r.devSnd) : 'fehlt');
   if (r.devSnd) add('beschreibbar', list(r.devSndWritable));
   if (r.cards) add('Soundkarten', r.cards.split('\n').filter(function (l) { return /^\s*\d+ \[/.test(l); }).map(function (l) { return l.trim(); }).join(' | ') || r.cards.trim().slice(0, 60));
@@ -391,7 +525,7 @@ function diagLines(r, extra) {
 }
 
 module.exports = {
-  probeAudio: probeAudio, diagLines: diagLines,
+  probeAudio: probeAudio, diagLines: diagLines, scanAlsa: scanAlsa, findPython: findPython,
   Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, sweepAt: sweepAt,
   RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };

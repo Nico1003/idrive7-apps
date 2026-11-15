@@ -45,9 +45,10 @@
     return out;
   }
   // Diagnose-Ansicht: Weiter / Schließen
-  var DIAG_LINES = 12;
+  var DIAG_LINES = 11;
   function hitsDiag() {
     return [
+      { key: 'diag-devtest', act: 'diagDevTest', arg: null, x: X1 - 760, y: 452, w: 270, h: 52, r: 14 },
       { key: 'diag-next', act: 'diagNext', arg: null, x: X1 - 470, y: 452, w: 220, h: 52, r: 14 },
       { key: 'diag-close', act: 'diagClose', arg: null, x: X1 - 230, y: 452, w: 230, h: 52, r: 14 }
     ];
@@ -149,12 +150,18 @@
     g.text('AUDIO-DIAGNOSE', X0, 70, 26, C.accent2, 'left', true);
     g.text('Seite ' + (page + 1) + '/' + pages, X1, 70, 22, C.dim, 'right', false);
     var ls = d.lines.slice(page * DIAG_LINES, page * DIAG_LINES + DIAG_LINES);
+    // Zeilen kürzen, damit sie nicht in die Knöpfe/den Rand laufen
+    ls = ls.map(function (l) { return l.length > 74 ? l.slice(0, 73) + '…' : l; });
     for (var i = 0; i < ls.length; i++) g.text(ls[i], X0, 110 + i * 28, 22, i === 0 && page === 0 ? C.text : C.dim, 'left', false);
     var b = hitsDiag();
     g.rrect(b[0].x, b[0].y, b[0].w, b[0].h, b[0].r, C.track);
-    g.text('Weiter', b[0].x + b[0].w / 2, b[0].y + 35, 24, C.text, 'center', true);
-    g.rrect(b[1].x, b[1].y, b[1].w, b[1].h, b[1].r, C.accent);
-    g.text('Schliessen', b[1].x + b[1].w / 2, b[1].y + 35, 24, '#ffffff', 'center', true);
+    g.text('Geraete testen', b[0].x + b[0].w / 2, b[0].y + 35, 24, C.warn, 'center', true);
+    g.rrect(b[1].x, b[1].y, b[1].w, b[1].h, b[1].r, C.track);
+    g.text('Weiter', b[1].x + b[1].w / 2, b[1].y + 35, 24, C.text, 'center', true);
+    g.rrect(b[2].x, b[2].y, b[2].w, b[2].h, b[2].r, C.accent);
+    g.text('Schliessen', b[2].x + b[2].w / 2, b[2].y + 35, 24, '#ffffff', 'center', true);
+    // Status (z. B. laufender Gerätetest) unten links
+    if (s.audio && s.audio.text) g.text(s.audio.text.length > 74 ? s.audio.text.slice(0, 73) + '…' : s.audio.text, X0, 440, 22, s.audio.ok ? C.ok : C.warn, 'left', true);
   }
 
   return { W: W, H: H, colors: C, draw: draw, hits: hits, hitsDiag: hitsDiag, hitAt: hitAt, DIAG_LINES: DIAG_LINES };

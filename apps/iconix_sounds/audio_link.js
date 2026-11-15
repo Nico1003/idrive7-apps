@@ -119,6 +119,13 @@ class AudioLink extends EventEmitter {
 
   params(sample) { this.latest = sample; }
 
+  /** Testsound nacheinander auf allen ALSA-Geräten, die der Dienst öffnen kann (je 4 s). */
+  testDevices() {
+    if (this.connected) return this.send({ op: 'testdevices' });
+    if (this.local) { this.local.testDevices(); return true; }
+    return false;
+  }
+
   test() {
     if (this.connected) return this.send({ op: 'test' });
     if (!this.local && this.fallback) this._startLocal();
@@ -133,7 +140,18 @@ class AudioLink extends EventEmitter {
   diagnose(ask) {
     let E;
     try { E = require('./engine'); } catch (e) { return ['engine.js fehlt: ' + e.message]; }
-    const head = ['Status: ' + this.status.text, 'Dienst: ' + (this.connected ? 'verbunden' : this._why()), '--- Sicht der App ---'];
+    const head = ['Status: ' + this.status.text, 'Dienst: ' + (this.connected ? 'verbunden' : this._why())];
+    const ds = this.daemonStatus;
+    if (this.connected && ds) {
+      head.push('Ausgabegerät: ' + (ds.device || 'auto') + ' · Python: ' + (ds.python || 'nicht gefunden'));
+      if (ds.scan) {
+        let n = 0;
+        head.push('ALSA-Geräte (Nummer = Einstellung "Gerät N"):');
+        ds.scan.forEach(x => head.push(x.ok ? '  ' + (++n) + ') ' + x.name + ' – lässt sich öffnen' : '  -  ' + x.name + ' – ' + String(x.error || 'Fehler').replace(/^(open|set_params): /, '')));
+      } else head.push('ALSA-Scan: ' + (ds.scanError || 'läuft noch …'));
+      head.push('"Geräte testen" spielt den Testsound auf jedem Gerät 1), 2), ... je 4 s');
+    }
+    head.push('--- Sicht der App ---');
     let r;
     try { r = E.probeAudio(); } catch (e) { return head.concat(['Diagnose fehlgeschlagen: ' + e.message]); }
     try { this.log.info('iconix: Audio-Diagnose (App) ' + JSON.stringify(r)); } catch (e) { /* egal */ }
@@ -211,6 +229,7 @@ class AudioLink extends EventEmitter {
   }
 
   _describe(m, prefix) {
+    if (m.devTest) return { ok: true, text: 'Gerätetest ' + m.devTest.i + '/' + m.devTest.n + ': ' + m.devTest.device + ' – hörst du etwas?' };
     if (m.error) return { ok: false, text: prefix + m.error };
     let text = prefix + (m.backend || '?') + ' · ' + khz(m.rate) + ' kHz' + (m.playing ? ' · spielt' : ' · bereit');
     // Aussetzer (Underruns des Abspielprogramms + verspätete Wakeups) sichtbar machen

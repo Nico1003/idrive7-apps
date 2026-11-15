@@ -19,10 +19,10 @@ const UI = require('./ui');
 const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, pops: false, sport: false,
-  muteParked: false, dialVolume: true, loadSource: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, dialVolume: true, loadSource: 'auto', alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -65,7 +65,8 @@ function startCore(host) {
       pops: bool(g('pops')),
       sport: bool(g('sport')),
       carIdle: feedCfg.carIdle,
-      carRedline: num(g('carRedline'), 4800)
+      carRedline: num(g('carRedline'), 4800),
+      device: String(g('alsaDevice') || 'auto')
     };
     uiCfg = { muteParked: bool(g('muteParked')), dialVolume: bool(g('dialVolume')) };
   };
@@ -189,6 +190,7 @@ mgu.run({
       else if (h.act === 'mute') set('enabled', !bool(get('enabled')));
       else if (h.act === 'diagNext' && diag) diag.page++;
       else if (h.act === 'diagClose') diag = null;
+      else if (h.act === 'diagDevTest') c.link.testDevices();
     };
     const HITS_DIAG = UI.hitsDiag().map(h => Object.assign({ run: () => act(h) }, h));
     const HITS = UI.hits(Profiles.list).map(h => Object.assign({ run: () => act(h) }, h));
