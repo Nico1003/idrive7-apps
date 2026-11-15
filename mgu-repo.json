@@ -17,23 +17,6 @@
   },
   "tools": [
     {
-      "id": "idrive7-renderd",
-      "path": "kit/renderd/prebuilt",
-      "title": "GPU renderer",
-      "description": "The apps' own GPU renderer (mgu-render): draws them at 60 fps, beside the MGU Store's Renderer; installed with the apps (iDrive 7 and iDrive 8)",
-      "mguHmi": ["ID7", "ID8"]
-    },
-    {
-      "id": "mgu-inputgate",
-      "path": "kit/renderd/inputgate/tool",
-      "title": "Controller gate",
-      "description": "Lets the apps have the iDrive controller (tabs, page buttons, settings, Doom); loads into the HMI at the next start (iDrive 7 and iDrive 8)",
-      "needs": ["renderer"],
-      "optional": false,
-      "uninstallable": true,
-      "mguHmi": ["ID7", "ID8"]
-    },
-    {
       "id": "iconix-audiod",
       "path": "tools/iconix-audiod",
       "title": "Iconix Audio",

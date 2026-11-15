@@ -2,12 +2,11 @@
   "id": "drive_coach",
   "title": "Fahrstil-Coach",
   "description": "Bewertet jede Fahrt: Vorausschau, Beschleunigen, Kurven, Ruhe, Drehzahl, Motorschonung und Leerlauf, mit Wasserglas, Live-Tipps, Verlauf, Level und Abzeichen",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "vendor": "custom",
   "loggingId": "DCO1",
   "iconGlyph": "coach",
   "mguHmi": ["ID7", "ID8"],
-  "requires": { "idrive7-renderd": "2.1.15" },
   "autostart": true,
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
