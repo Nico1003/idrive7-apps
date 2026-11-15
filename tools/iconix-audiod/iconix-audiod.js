@@ -35,7 +35,10 @@ const VERSION = '0.1.0';
 const RATE = Number(process.env.ICONIX_RATE) || 44100;
 const SOCKET = process.env.ICONIX_AUDIOD_SOCKET || '/run/iconix-audiod/audiod.sock';
 const TICK_MS = 20;          // 50 Wakeups/s (Blöcke à 882 Samples) – schont die CPU
-const LEAD_MS = 80;          // so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter sein)
+// so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter des Head Units sein). 160 ms gibt Reserve,
+// wenn Node auf dem Head Unit kurz hängt (GC, andere Apps) – sonst knackt/stottert es (Underrun).
+const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
+const BUFFER_US = Number(process.env.ICONIX_BUFFER_US) || 200000; // Puffer des Abspielprogramms
 const STALE_MS = 1500;       // ohne Daten -> ausblenden
 const IDLE_STOP_MS = 8000;   // so lange still -> Abspielprogramm beenden (gibt das Audiogerät frei)
 const MAX_CHUNK = 4096;
@@ -52,7 +55,7 @@ const BACKENDS = [
   {
     name: 'aplay', bin: 'aplay',
     args: function (r) {
-      const a = ['-q', '-t', 'raw', '-f', 'S16_LE', '-r', String(r), '-c', '2', '--buffer-time=100000'];
+      const a = ['-q', '-t', 'raw', '-f', 'S16_LE', '-r', String(r), '-c', '2', '--buffer-time=' + BUFFER_US, '--period-time=' + Math.round(BUFFER_US / 4)];
       if (process.env.ICONIX_DEVICE) a.push('-D', process.env.ICONIX_DEVICE);
       a.push('-');
       return a;
@@ -60,7 +63,7 @@ const BACKENDS = [
   },
   {
     name: 'pacat', bin: 'pacat',
-    args: function (r) { return ['--playback', '--raw', '--format=s16le', '--rate=' + r, '--channels=2', '--latency-msec=60']; }
+    args: function (r) { return ['--playback', '--raw', '--format=s16le', '--rate=' + r, '--channels=2', '--latency-msec=' + Math.round(BUFFER_US / 1000)]; }
   },
   {
     name: 'pw-cat', bin: 'pw-cat',
@@ -143,7 +146,10 @@ Output.prototype.start = function () {
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', function (d) {
     const line = String(d).trim().split('\n').pop();
-    if (line) { self.lastErr = line.slice(0, 120); log(b.name + ':', line); }
+    if (!line) return;
+    // aplay meldet Aussetzer als "underrun!!! (at least X ms long)" – zählen statt als Fehler werten
+    if (/underrun|xrun/i.test(line)) { self.underruns = (self.underruns || 0) + 1; if (self.underruns <= 5 || self.underruns % 50 === 0) log(b.name + ':', line, '(#' + self.underruns + ')'); return; }
+    self.lastErr = line.slice(0, 120); log(b.name + ':', line);
   });
   child.stdin.on('error', function () { /* EPIPE -> exit folgt */ });
   child.stdin.on('drain', function () { self.blocked = false; });
@@ -223,13 +229,15 @@ function runDaemon() {
   let t0 = 0, written = 0;
   const f32 = new Float32Array(MAX_CHUNK * 2);
   const clients = new Set();
+  let lastTick = Date.now(), lateTicks = 0;
 
   const out = new Output(function () { broadcast(false); });
 
   function status() {
     return {
       op: 'status', version: VERSION, ok: !out.error, backend: out.backend || (out.list[0] && !out.error ? out.list[0].name : null),
-      rate: RATE, playing: !!out.child, error: out.error, profile: synth.cfg.profile
+      rate: RATE, playing: !!out.child, error: out.error, profile: synth.cfg.profile,
+      underruns: out.underruns || 0, late: lateTicks, leadMs: LEAD_MS
     };
   }
   let lastLine = '', lastSent = 0;
@@ -278,9 +286,11 @@ function runDaemon() {
   });
   server.on('error', function (e) { log('Socket-Fehler:', e.message); process.exit(1); });
 
-  // Taktgeber
+  // Taktgeber; lateTicks zählt Wakeups, die so spät kamen, dass der Vorlauf aufgebraucht war
   setInterval(function () {
     const now = Date.now();
+    if (out.child && now - lastTick > LEAD_MS) lateTicks++;
+    lastTick = now;
     const testing = now < testUntil;
     if (testing) {
       synth.setParams(sweepAt((now - testStart) / 1000, synth.cfg));

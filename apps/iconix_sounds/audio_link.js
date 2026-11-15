@@ -108,6 +108,9 @@ class AudioLink extends EventEmitter {
     if (m.error) text = 'Audio: ' + m.error;
     else if (m.backend) text = 'Audio: ' + m.backend + ' · ' + String((m.rate || 44100) / 1000).replace('.', ',') + ' kHz' + (m.playing ? ' · spielt' : ' · bereit');
     else text = 'Audio-Dienst verbunden';
+    // Aussetzer (Underruns des Abspielprogramms + verspätete Wakeups) sichtbar machen
+    const drops = (m.underruns || 0) + (m.late || 0);
+    if (!m.error && drops > 0) text += ' · ' + drops + ' Aussetzer';
     this._setStatus({ ok: !m.error && !!m.backend, text: text, raw: m });
   }
 

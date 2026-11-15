@@ -176,13 +176,26 @@ mgu.run({
     ctx.ui.onClick('BTN_MUTE', () => set('enabled', !bool(get('enabled'))));
     ctx.ui.onClick('BTN_TEST', () => c.link.test());
 
-    // iDrive-Controller
+    // Bedienbare Flächen (Profil-Chips, Lautstärke −/+, Stumm) – Geometrie aus ui.js
+    const act = h => {
+      if (h.act === 'profile') set('profile', h.arg);
+      else if (h.act === 'vol') changeVolume(h.arg);
+      else if (h.act === 'mute') set('enabled', !bool(get('enabled')));
+    };
+    const HITS = UI.hits(Profiles.list).map(h => Object.assign({ run: () => act(h) }, h));
+
+    // Zwei Betriebsarten des Kits (kit/runtime/display.js):
+    //  - "Kit führt den Bildschirm" (cv.own: GPU-Renderer mit Touch-Weiterleitung): Touch und der iDrive-Knopf
+    //    gehen über die Ziele aus cv.target(...) – Drehen wandert über Chips/Knöpfe/Leiste, Drücken löst aus.
+    //    ctx.controller.onInput bekommt dann nichts (das Kit wertet den Knopf selbst aus).
+    //  - sonst: kein Touch auf der Seite möglich; der Knopf kommt per grab/onInput (Drehen = Lautstärke).
     const decode = makeInputDecoder(log);
-    let grabbed = false;
+    let grabbed = false, visible = false, own = false;
     const grab = on => {
       if (!ctx.controller || grabbed === on) return;
       try { ctx.controller.grab(on); grabbed = on; } catch (e) { log.warn('iconix: grab: ' + e.message); }
     };
+    const updateGrab = () => grab(visible && !own && c.ui().dialVolume);
     if (ctx.controller && ctx.controller.onInput) {
       ctx.controller.onInput(ev => {
         const i = decode(ev);
@@ -191,16 +204,11 @@ mgu.run({
       });
     }
     if (ctx.ui.onVisible) {
-      ctx.ui.onVisible((name, visible) => {
-        if (name === 'MAIN') grab(visible && c.ui().dialVolume);
-      });
+      ctx.ui.onVisible((name, v) => { if (name === 'MAIN') { visible = v; updateGrab(); } });
     }
-    // Touch auf dem Bildschirm: Tippen auf einen Profil-Chip wählt ihn
+    // Rückfall: Tippen ohne Ziel (falls ein Kit-Stand Taps nur über onTap liefert)
     if (ctx.onTap) {
-      ctx.onTap((x, y) => {
-        const hit = profileAt(x, y);
-        if (hit) set('profile', hit);
-      });
+      ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y); if (h) act(h); });
     }
 
     // Bildschirm (wie apps/redline/main.js): pro Frame ctx.canvas(W, H) holen – das Kit gibt denselben,
@@ -208,11 +216,15 @@ mgu.run({
     // Mit GPU-Renderer ruft das Kit die Schleife bis zu 60x/s; ein Frame ohne Änderung wird nicht gesendet.
     // Ohne Renderer (PNG-Weg) gilt die angefragte Rate: 20 fps reichen für die Drehzahlanzeige.
     // Das Zustandsobjekt wird wiederverwendet (keine Allokation pro Frame).
-    const HINT = 'Drehen: Lautstärke · Drücken: Sound wechseln';
+    const HINT_DIAL = 'Drehen: Lautstärke · Drücken: Sound wechseln';
+    const HINT_TOUCH = 'Antippen oder iDrive: Sound und Lautstärke wählen';
     const st = { profiles: Profiles.list };
     ctx.loop('MAIN', 20, () => {
       const cv = ctx.canvas(UI.W, UI.H);
       const g = kitGfx(cv);
+      visible = true;
+      if (!!cv.own !== own) { own = !!cv.own; log.info('iconix: Kit führt den Bildschirm: ' + own); }
+      updateGrab();
       const s = c.last();
       const cfg = c.synthCfg();
       st.profile = cfg.profile;
@@ -220,8 +232,12 @@ mgu.run({
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
       st.sport = cfg.sport; st.pops = cfg.pops; st.demo = !s;
       st.audio = c.link.status;
-      st.hint = c.ui().dialVolume ? HINT : '';
+      st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
       UI.draw(g, st);
+      // Ziele nach dem Zeichnen registrieren (wie apps/dyno, live_data: nur wenn cv.own)
+      if (own && typeof cv.target === 'function') {
+        for (let i = 0; i < HITS.length; i++) { const h = HITS[i]; cv.target(h.x, h.y, h.w, h.h, h.run, h.key, h.r); }
+      }
       return ctx.ui.image('MAIN_GFX', cv);
     });
 
@@ -236,13 +252,3 @@ mgu.run({
     return null;
   }
 });
-
-// Trefferprüfung für die Profil-Chips (gleiche Geometrie wie ui.js)
-function profileAt(x, y) {
-  const x0 = 600, cw = 222, ch = 48, gap = 12;
-  for (let i = 0; i < Profiles.list.length; i++) {
-    const px = x0 + (i % 4) * (cw + gap), py = 172 + Math.floor(i / 4) * (ch + gap);
-    if (x >= px && x <= px + cw && y >= py && y <= py + ch) return Profiles.list[i].id;
-  }
-  return null;
-}

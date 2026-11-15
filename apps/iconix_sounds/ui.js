@@ -25,6 +25,31 @@
 
   function pct(x) { return Math.round(x * 100) + ' %'; }
 
+  // Geometrie der bedienbaren Flächen – EINE Quelle für Zeichnen, Touch-Ziele im Auto (cv.target)
+  // und Klicks im Simulator.
+  var X0 = 600, X1 = 1540, CW = 222, CH = 48, GAP = 12, CHIP_Y = 172;
+  var VY = 330, VB = 64;           // Lautstärke-Zeile, Breite der −/+-Knöpfe
+  function chipRect(i) {
+    return { x: X0 + (i % 4) * (CW + GAP), y: CHIP_Y + Math.floor(i / 4) * (CH + GAP), w: CW, h: CH, r: 12 };
+  }
+  /** Bedienbare Flächen: [{ key, act, arg, x, y, w, h, r }] – act: 'profile' | 'vol' | 'mute' */
+  function hits(profiles) {
+    var out = [], i, c;
+    for (i = 0; i < profiles.length; i++) {
+      c = chipRect(i);
+      out.push({ key: 'profile:' + profiles[i].id, act: 'profile', arg: profiles[i].id, x: c.x, y: c.y, w: c.w, h: c.h, r: c.r });
+    }
+    out.push({ key: 'vol-', act: 'vol', arg: -1, x: X0, y: VY + 4, w: VB, h: 52, r: 14 });
+    out.push({ key: 'vol+', act: 'vol', arg: 1, x: X1 - VB, y: VY + 4, w: VB, h: 52, r: 14 });
+    out.push({ key: 'mute', act: 'mute', arg: null, x: X1 - 230, y: VY - 40, w: 230, h: 44, r: 10 });
+    return out;
+  }
+  function hitAt(profiles, x, y) {
+    var h = hits(profiles);
+    for (var i = 0; i < h.length; i++) if (x >= h[i].x && x <= h[i].x + h[i].w && y >= h[i].y && y <= h[i].y + h[i].h) return h[i];
+    return null;
+  }
+
   /**
    * state = {
    *   profiles: [{id, name}], profile: 'v8',
@@ -52,38 +77,42 @@
     g.text(Math.round(s.speed || 0) + ' km/h', cx, cy + 150, 40, C.text, 'center', true);
 
     // ---- Profil -------------------------------------------------------
-    var x0 = 600, x1 = 1540;
+    var x0 = X0, x1 = X1;
     g.text('ICONIX SOUNDS', x0, 70, 26, C.dim, 'left', true);
     var cur = null, i;
     for (i = 0; i < s.profiles.length; i++) if (s.profiles[i].id === s.profile) cur = s.profiles[i];
     g.text(cur ? cur.name : '–', x0, 140, 62, s.enabled ? C.text : C.dim, 'left', true);
 
-    // Profil-Chips (2 Reihen à 4)
-    var cw = 222, ch = 48, gap = 12;
+    // Profil-Chips (2 Reihen à 4) – antippbar
     for (i = 0; i < s.profiles.length; i++) {
-      var px = x0 + (i % 4) * (cw + gap), py = 172 + Math.floor(i / 4) * (ch + gap);
+      var c = chipRect(i);
       var active = s.profiles[i].id === s.profile;
-      g.rrect(px, py, cw, ch, 12, active ? C.accent : C.panel);
-      g.text(s.profiles[i].name, px + cw / 2, py + 32, 22, active ? '#ffffff' : C.dim, 'center', active);
+      g.rrect(c.x, c.y, c.w, c.h, c.r, active ? C.accent : C.panel);
+      g.text(s.profiles[i].name, c.x + c.w / 2, c.y + 32, 22, active ? '#ffffff' : C.dim, 'center', active);
     }
 
-    // ---- Lautstärke ----------------------------------------------------
-    var vy = 330;
-    g.text('Lautstärke', x0, vy, 28, C.dim, 'left', false);
-    g.text(s.enabled ? pct(s.volume) : 'STUMM', x1, vy, 28, s.enabled ? C.text : C.warn, 'right', true);
-    g.rrect(x0, vy + 14, x1 - x0, 26, 13, C.track);
-    var vw = (x1 - x0) * Math.max(0, Math.min(1, s.volume));
-    if (vw > 26) g.rrect(x0, vy + 14, vw, 26, 13, s.enabled ? C.accent2 : C.dim);
+    // ---- Lautstärke: [−] Balken [+], Antippen von "60 %"/"STUMM" schaltet stumm ----
+    var vy = VY;
+    g.text('Lautstärke', x0, vy - 8, 28, C.dim, 'left', false);
+    g.text(s.enabled ? pct(s.volume) : 'STUMM', x1, vy - 8, 28, s.enabled ? C.text : C.warn, 'right', true);
+    g.rrect(x0, vy + 4, VB, 52, 14, C.panel);
+    g.text('–', x0 + VB / 2, vy + 42, 40, C.text, 'center', true);
+    g.rrect(x1 - VB, vy + 4, VB, 52, 14, C.panel);
+    g.text('+', x1 - VB / 2, vy + 42, 40, C.text, 'center', true);
+    var bx = x0 + VB + 16, bw = x1 - x0 - 2 * (VB + 16);
+    g.rrect(bx, vy + 17, bw, 26, 13, C.track);
+    var vw = bw * Math.max(0, Math.min(1, s.volume));
+    if (vw > 26) g.rrect(bx, vy + 17, vw, 26, 13, s.enabled ? C.accent2 : C.dim);
 
     // ---- Last ---------------------------------------------------------
-    var ly = 410;
+    var ly = 432;
     g.text('Last', x0, ly, 24, C.dim, 'left', false);
     g.rrect(x0 + 80, ly - 18, x1 - x0 - 80, 14, 7, C.track);
     var lw = (x1 - x0 - 80) * Math.max(0, Math.min(1, s.load || 0));
     if (lw > 14) g.rrect(x0 + 80, ly - 18, lw, 14, 7, C.ok);
 
     // ---- Status -------------------------------------------------------
-    var sy = 480;
+    var sy = 490;
     var a = s.audio || { ok: false, text: 'Audio-Dienst nicht verbunden' };
     g.rrect(x0, sy - 20, 20, 20, 10, a.ok ? C.ok : C.crit);
     g.text(a.text, x0 + 32, sy - 2, 24, C.dim, 'left', false);
@@ -102,5 +131,5 @@
     if (s.hint) g.text(s.hint, cx, 505, 22, C.dim, 'center', false);
   }
 
-  return { W: W, H: H, colors: C, draw: draw };
+  return { W: W, H: H, colors: C, draw: draw, hits: hits, hitAt: hitAt };
 });
