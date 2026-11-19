@@ -25,7 +25,7 @@ const Coach = require('./coach');
 const Goals = require('./goals');
 
 const W = 1600, H = 520;
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const FES = 'de.bmw.infotainment.drivingexcitement.FES';
 const GOOD = '#2fd27a', WATER = '#3d9bff';
 const MAX_TRIPS = 400;

@@ -199,9 +199,51 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
             os.write(1, ('P %d\n' % max(0, total - max(0, delay.value))).encode())
         except OSError:
             pass
+    # Schutz gegen Leerlaufen: Stockt der Dienst (Head Unit beim Hochfahren ausgelastet), spielt SmartX sonst den
+    # alten Inhalt seines Ringpuffers in Schleife ab - klingt wie ein Quietschen. Darum hier kurz vorher selbst
+    # Stille nachlegen. Wird als "underrun" gemeldet, damit der Dienst seinen Vorlauf vergrößert.
+    guard = max(1, rate * 12 // 1000)          # weniger als 12 ms im Puffer -> Stille nachlegen
+    fill_n = max(1, rate * 10 // 1000)         # je 10 ms
+    zeros = bytes(fill_n * frame_bytes)
+    fd = stdin.fileno()
+    fills = 0
+    try:
+        import select
+    except ImportError:
+        select = None
+    # mit 20 ms Stille beginnen: SmartX hat dann sofort frische Daten statt alter Reste im Ringpuffer
+    for _ in range(2):
+        w = lib.snd_pcm_writei(h, zeros, fill_n)
+        if w > 0:
+            total += w
     try:
         while True:
-            data = stdin.read1(chunk) if hasattr(stdin, 'read1') else stdin.read(chunk)
+            if select is not None and total > 0:
+                d = delay.value if lib.snd_pcm_delay(h, ctypes.byref(delay)) >= 0 else 0
+                wait = max(0.002, (d - guard) / float(rate))
+                ready = select.select([fd], [], [], wait)[0]
+                if not ready:
+                    r = lib.snd_pcm_delay(h, ctypes.byref(delay))
+                    if r < 0:
+                        lib.snd_pcm_recover(h, int(r), 1)
+                        delay.value = 0
+                    if delay.value < guard:
+                        w = lib.snd_pcm_writei(h, zeros, fill_n)
+                        if w > 0:
+                            total += w
+                            fills += 1
+                            if fills <= 5 or fills % 100 == 0:
+                                sys.stderr.write('underrun!!! (Stille nachgelegt, #%d)\n' % fills)
+                                sys.stderr.flush()
+                            report()
+                        elif w < 0:
+                            lib.snd_pcm_recover(h, int(w), 1)
+                    continue
+                data = os.read(fd, chunk)
+            elif select is not None:
+                data = os.read(fd, chunk)      # nicht mit stdin.read1 mischen (dessen Puffer würde Bytes behalten)
+            else:
+                data = stdin.read1(chunk) if hasattr(stdin, 'read1') else stdin.read(chunk)
             if not data:
                 break
             data = pending + data

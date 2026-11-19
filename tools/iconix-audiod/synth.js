@@ -42,15 +42,15 @@
   var INV32 = 1 / 4294967296;
   var C_EXH = 520;           // Schallgeschwindigkeit im heißen Abgas (m/s)
   var MAXP = 24;             // gleichzeitige Impulse
-  var HEADROOM = 0.8;
+  var HEADROOM = 0.85;
   // Kompressor (wie bei Active Sound Design): leise Passagen (Gleiten, Schub, Leerlauf) bis +6 dB lauter,
-  // Vollgas bleibt gleich. Pegel bezogen auf Lautstärke 100 %; Verhältnis 2:1 oberhalb COMP_T.
-  var COMP_T = 0.2, COMP_EXP = 0.5, COMP_MAKEUP = 2.0;
+  // Vollgas bleibt gleich. Pegel bezogen auf Lautstärke 100 %; Verhältnis 3:1 oberhalb COMP_T (leise bis ~+10 dB).
+  var COMP_T = 0.15, COMP_EXP = 0.667, COMP_MAKEUP = 3.0;
 
   function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
   function finite(x, d) { return (typeof x === 'number' && isFinite(x)) ? x : d; }
   // weicher Begrenzer oberhalb 0,8 (statt hartem Abschneiden bei 1)
-  function softLimit(s) { var a = s < 0 ? -s : s, y = 0.8 + 0.2 * Math.tanh((a - 0.8) / 0.2); return s < 0 ? -y : y; }
+  function softLimit(s) { var a = s < 0 ? -s : s, y = 0.85 + 0.13 * Math.tanh((a - 0.85) / 0.13); return s < 0 ? -y : y; }
   function val(v, d) { return v == null ? d : v; }
   function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
 
@@ -157,7 +157,7 @@
     function k(sec) { return 1 - Math.exp(-CR / (sr * sec)); }
     this.kRel = Math.exp(-CR / (sr * 0.3)); this.kCompUp = k(0.25);
     this.prePk = 0; this.cEnv = 0; this.comp = COMP_MAKEUP;
-    this.kR = k(0.05); this.kL = k(0.07); this.kS = k(0.2); this.kG = k(0.12); this.kV = k(0.1);
+    this.kR = k(0.025); this.kL = k(0.04); this.kS = k(0.2); this.kG = k(0.12); this.kV = k(0.1);
 
     // Impuls-Pool
     this.pR = new Float64Array(MAXP); this.pE1 = new Float64Array(MAXP); this.pE2 = new Float64Array(MAXP);
@@ -239,7 +239,7 @@
       if (!Object.prototype.hasOwnProperty.call(c, k) || k === 'profile') continue;
       if (Object.prototype.hasOwnProperty.call(this.cfg, k)) this.cfg[k] = c[k];
     }
-    this.cfg.volume = clamp(finite(+this.cfg.volume, 0.6), 0, 1);
+    this.cfg.volume = clamp(finite(+this.cfg.volume, 0.8), 0, 1.5);
     this.cfg.intensity = clamp(finite(+this.cfg.intensity, 0.7), 0, 1);
     this.cfg.carIdle = clamp(finite(+this.cfg.carIdle, 800), 300, 2000);
     this.cfg.carRedline = clamp(finite(+this.cfg.carRedline, 4800), this.cfg.carIdle + 500, 12000);
@@ -276,9 +276,11 @@
     var tgtGain = (c.enabled && !this.stale && !this.pending) ? 1 : 0;
     // Lautstärkekurve v^1,5 (vorher v²): 60 % klingen jetzt wie früher ~70 %
     var vk = (p.gain || 1) * (c.sport ? 1.3 : 1);
-    var tgtVol = Math.pow(c.volume, 1.5) * vk;
+    // über 100 % (Boost): der Überschuss geht VOR den Kompressor -> leise Stellen lauter, Spitzen begrenzt
+    var vc = Math.pow(c.volume, 1.5), boost = vc > 1 ? vc : 1;
+    var tgtVol = (vc > 1 ? 1 : vc) * vk * boost;
     // Hüllkurve des Pegels (Spitze je Block, ~300 ms Abklingen) -> Kompressionsfaktor
-    var lev = this.prePk * vk * HEADROOM; this.prePk = 0;
+    var lev = this.prePk * vk * HEADROOM * boost; this.prePk = 0;
     this.cEnv = lev > this.cEnv ? lev : this.cEnv * this.kRel;
     var cg = (this.cEnv > COMP_T ? Math.pow(COMP_T / this.cEnv, COMP_EXP) : 1) * COMP_MAKEUP;
     this.comp += (cg - this.comp) * (cg < this.comp ? 0.5 : this.kCompUp);
@@ -316,19 +318,23 @@
     // Pegel: feste Ladung in kürzerem Impuls = höherer Spitzenfluss (gedämpft, damit es oben nicht schreit)
     var flow = Math.pow(d1Red / d1, p.flowExp || 0.55);
     // Schub: kein Verbrennen, nur Pump-/Strömungsimpulse – leiser und dumpf, aber hörbar (Schubblubbern)
-    var comb = this.target.overrun ? val(p.pump, 0.45) : 0.18 + 0.82 * Math.pow(load, 0.85);
-    // Lastsprünge (Schalten, Gas weg, Schub) über ~80 ms glätten – sonst knackt der Übergang
-    this.combS += (comb - this.combS) * (1 - Math.exp(-CR / (sr * 0.08)));
+    // Grundpegel ohne Last steigt mit der Drehzahl (Strömung, Mechanik) – sonst ist es oben ohne Gas fast still
+    var base = 0.18 + 0.32 * Math.pow(clamp((x - 0.2) / 0.6, 0, 1), 1.2);
+    var comb = this.target.overrun ? Math.max(val(p.pump, 0.45) * (0.75 + 0.5 * Math.min(x, 1)), base * 0.9) : base + (1 - base) * Math.pow(load, 0.85);
+    // Lastsprünge (Schalten, Gas weg, Schub) glätten – sonst knackt der Übergang; Gas geben schneller als Gas weg
+    this.combS += (comb - this.combS) * (1 - Math.exp(-CR / (sr * (comb > this.combS ? 0.05 : 0.08))));
     comb = this.combS;
     var cylF = Math.pow(P.cylVol / 0.5, 0.35) / Math.sqrt(Math.max(1, P.n) / 4) * clamp(rpm / 250, 0, 1);
-    this.pulseAmp = comb * flow * cylF;
+    // ohne Last sind die Impulse weich (dunkel) und verlieren Pegel – oben im Drehzahlband ausgleichen
+    var noLoadLift = 1 + 1.8 * clamp(1 - effLoad * 6, 0, 1) * clamp((x - 0.25) / 0.6, 0, 1);
+    this.pulseAmp = comb * flow * cylF * noLoadLift;
     this.noiseAmt = val(p.rasp, 0.05) * (0.01 + 0.99 * effLoad * effLoad) * (0.3 + 0.7 * Math.min(x, 1));
     // Zylinder-Ungleichheit unter Last (bringt Halbordnungen = Brummen)
     this.unevW = (p.unev || 0) * Math.min(load, 1) * (0.3 + 0.7 * Math.pow(Math.min(x, 1), 2)) * (0.5 + inten);
     this.idleW = clamp(Math.pow(1 - (x - 0.06) / 0.35, 2), 0, 1) * (x < 0.41 ? 1 : 0);
     // Rohre: Schalldämpfer öffnet etwas mit Last (Klappe)
     this.pipeFb = val(p.pipeFb, 0.3); this.hdrFb = val(p.hdrFb, 0.25); this.chamFb = val(p.chamberFb, 0.3);
-    this.fMuff.set('lp', (p.mufflerHz || 1200) * (0.75 + 0.5 * effLoad * inten) * (0.85 + 0.3 * Math.min(x, 1)), p.mufflerQ || 0.7, sr);
+    this.fMuff.set('lp', (p.mufflerHz || 1200) * (0.75 + 0.5 * effLoad * inten + 0.15 * Math.min(x, 1) * (1 - effLoad)) * (0.85 + 0.3 * Math.min(x, 1)), p.mufflerQ || 0.7, sr);
   };
 
   Synth.prototype._controlElec = function () {

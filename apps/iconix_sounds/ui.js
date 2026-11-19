@@ -128,7 +128,7 @@
     g.line(x1 - VB / 2, vy + 18, x1 - VB / 2, vy + VB - 18, 3, C.text);
     var bx = x0 + VB + 28, bw = x1 - x0 - 2 * (VB + 28), by = vy + VB / 2;
     g.rrect(bx, by - 3, bw, 6, 3, C.track);
-    var v = Math.max(0, Math.min(1, s.volume)), vx = bx + bw * v;
+    var v = Math.max(0, Math.min(1, s.volume / 1.5)), vx = bx + bw * v; // Regler bis 150 %
     if (v > 0.01) g.rrect(bx, by - 3, vx - bx, 6, 3, s.enabled ? C.accent : C.faint);
     g.rrect(vx - 11, by - 11, 22, 22, 11, s.enabled ? '#ffffff' : C.dim);
 

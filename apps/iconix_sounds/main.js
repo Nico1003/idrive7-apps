@@ -22,10 +22,10 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.3';
+const VERSION = '0.9.4';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
-  enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, sport: false,
+  enabled: true, profile: Profiles.DEFAULT, volume: 80, intensity: 70, sport: false,
   muteParked: false, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
@@ -64,7 +64,7 @@ function startCore(host) {
     synthCfgCache = {
       enabled: bool(g('enabled')) && !parkedMute,
       profile: Profiles.ids.indexOf(String(g('profile'))) >= 0 ? String(g('profile')) : Profiles.DEFAULT,
-      volume: num(g('volume'), 60) / 100,
+      volume: num(g('volume'), 80) / 100,
       intensity: num(g('intensity'), 70) / 100,
       sport: bool(g('sport')),
       carIdle: feedCfg.carIdle,
@@ -179,6 +179,10 @@ function wrapLines(lines) {
 }
 
 mgu.run({
+  // Autostart (app.json "autostart": true): die Plattform startet die App beim Hochfahren ohne Bildschirm;
+  // dann läuft nur der Kern (Fahrzeugdaten -> Dienst, Audiomanager-Verbindung). Öffnet man die App später,
+  // nutzt start() denselben Kern.
+  background(bg) { return startCore(bg); },
   async start(ctx) {
     const c = startCore(ctx);
     const log = ctx.log || console;
@@ -192,7 +196,7 @@ mgu.run({
 
     const nextProfile = () => set('profile', Profiles.next(String(get('profile')), 1));
     const changeVolume = steps => {
-      const v = Math.max(0, Math.min(100, Math.round((num(get('volume'), 60) + steps * 5) / 5) * 5));
+      const v = Math.max(0, Math.min(150, Math.round((num(get('volume'), 80) + steps * 5) / 5) * 5));
       set('volume', v);
     };
 

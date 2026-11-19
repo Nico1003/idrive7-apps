@@ -26,12 +26,17 @@ const IDLE_TICK_MS = 200;    // ohne Ton nur 5 Wakeups/s; neue Fahrzeugdaten ode
 const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
 // Mit Rückmeldung des Players (alsa_play.py meldet gespielte Frames): so viel Ton steht höchstens an
 // (ALSA-Puffer + Pipe). Das ist die Verzögerung zwischen Fahrzeugdaten und Lautsprecher.
-const FB_LEAD_MS = Number(process.env.ICONIX_FB_LEAD_MS) || 110;
+// Untergrenze 70 ms (siehe FB_LEAD_START für den Start und die Anpassung).
+const FB_LEAD_MS = Number(process.env.ICONIX_FB_LEAD_MS) || 70;
+const FB_LEAD_MAX = 200;
+// Start großzügig (Head Unit beim Hochfahren ausgelastet -> sonst Aussetzer/Quietschen), danach alle 20 s
+// ohne Aussetzer 10 ms knapper bis FB_LEAD_MS; bei einem Aussetzer sofort +30 ms.
+const FB_LEAD_START = 120;
 const BUFFER_US = Number(process.env.ICONIX_BUFFER_US) || 200000; // Puffer des Abspielprogramms
 const STALE_MS = 1500;       // ohne Daten -> ausblenden
 const IDLE_STOP_MS = 8000;   // so lange still -> Abspielprogramm beenden (gibt das Audiogerät frei)
 const MAX_CHUNK = 4096;
-const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 70000; // SmartX: kurzer Puffer
+const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 40000; // SmartX: kurzer Puffer
 const SMARTX_RETRY_MS = 3000; // SmartX-Kanal ließ sich nicht öffnen -> so oft erneut probieren
 
 // ---------------------------------------------------------------------------
@@ -531,7 +536,7 @@ Engine.prototype.status = function () {
     ok: !out.error,
     backend: out.backend || (out.list[0] && !out.error ? out.list[0].name : null),
     rate: RATE, playing: !!out.child, error: out.error, profile: this.synth.cfg.profile,
-    underruns: out.underruns || 0, late: this.late, leadMs: out.played != null && out.child ? FB_LEAD_MS : LEAD_MS,
+    underruns: out.underruns || 0, late: this.late, leadMs: out.played != null && out.child ? (this.fbLead || FB_LEAD_MS) : LEAD_MS,
     players: out.list.map(function (b) { return b.name; }),
     device: this.device, resolved: out.opts.device, python: findPython(),
     wants: !!this.wantSound, outRate: out.fmt.rate, outCh: out.fmt.ch,
@@ -621,8 +626,14 @@ Engine.prototype._tick = function () {
   }
   if (out.played != null) {
     // Regelkreis: nur nachschreiben, was bis zum Ziel-Vorlauf fehlt (geschrieben − gespielt = was ansteht)
+    // Vorlauf anpassen: Aussetzer -> mehr Reserve, lange keine -> wieder knapper
+    if (this.fbLead == null) { this.fbLead = Math.max(FB_LEAD_MS, FB_LEAD_START); this.fbUnder = out.underruns || 0; this.fbCalm = now; }
+    if ((out.underruns || 0) > this.fbUnder) {
+      this.fbUnder = out.underruns; this.fbCalm = now;
+      if (this.fbLead < FB_LEAD_MAX) { this.fbLead = Math.min(FB_LEAD_MAX, this.fbLead + 30); this.log('Aussetzer – Vorlauf jetzt ' + this.fbLead + ' ms'); }
+    } else if (now - this.fbCalm > 20000 && this.fbLead > FB_LEAD_MS) { this.fbLead = Math.max(FB_LEAD_MS, this.fbLead - 10); this.fbCalm = now; }
     const queued = this.written / step - out.played;
-    due = Math.floor((FB_LEAD_MS / 1000 * RATE / step - queued)) * step;
+    due = Math.floor((this.fbLead / 1000 * RATE / step - queued)) * step;
   } else {
     due = Math.floor((now - this.t0 + LEAD_MS) / 1000 * RATE) - this.written;
     if (due > RATE / 2) { this.t0 = now; this.written = 0; due = Math.floor(LEAD_MS / 1000 * RATE); } // Resync nach Hänger
@@ -864,5 +875,5 @@ module.exports = {
   probeSmartx: probeSmartx, smartxLines: smartxLines, usable: usable,
   Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, toPcmFmt: toPcmFmt, Decimator: Decimator, sweepAt: sweepAt,
   smartxEndpoints: smartxEndpoints, resolveSmartx: resolveSmartx, formatOf: formatOf, isSmartx: isSmartx,
-  RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, FB_LEAD_MS: FB_LEAD_MS, MAX_CHUNK: MAX_CHUNK
+  RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, FB_LEAD_MS: FB_LEAD_MS, FB_LEAD_START: FB_LEAD_START, MAX_CHUNK: MAX_CHUNK
 };

@@ -124,6 +124,12 @@ class VehicleFeed extends EventEmitter {
     let load = 0, overrun = false, src = cfg.loadSource;
 
     if (src === 'auto') src = this.fresh('torque') ? 'torque' : (this.fresh('pedal') ? 'pedal' : 'rpm');
+    // Drehzahlanstieg der letzten ~250 ms (U/min pro s) – für alle Lastquellen
+    this.rpmHist.push([now, rpm]);
+    while (this.rpmHist.length > 2 && now - this.rpmHist[0][0] > 250) this.rpmHist.shift();
+    const h0 = this.rpmHist[0];
+    const dt = (now - h0[0]) / 1000;
+    const slope = dt > 0.05 ? (rpm - h0[1]) / dt : 0;
 
     if (src === 'torque' && this.fresh('torque')) {
       load = clamp(this.v.torque / (cfg.maxTorque || 400), 0, 1);
@@ -132,17 +138,19 @@ class VehicleFeed extends EventEmitter {
       load = this.v.pedal / 100;
       overrun = this.v.pedal < 1 && rpm > cfg.carIdle + 400;
     } else {
-      // Ersatz: Drehzahlanstieg der letzten ~300 ms
-      this.rpmHist.push([now, rpm]);
-      while (this.rpmHist.length > 2 && now - this.rpmHist[0][0] > 300) this.rpmHist.shift();
-      const h0 = this.rpmHist[0];
-      const dt = (now - h0[0]) / 1000;
-      const slope = dt > 0.05 ? (rpm - h0[1]) / dt : 0; // U/min pro Sekunde
+      // Ersatz: Drehzahlanstieg
       load = clamp(slope / 1500, 0, 1);
       overrun = slope < -300 && rpm > cfg.carIdle + 400;
     }
-    // leicht glätten, damit Lastsprünge nicht knacken
-    this.load += (load - this.load) * 0.5;
+    // Runterschalten: Das Getriebe gibt Zwischengas, die Drehzahl springt hoch, das Moment bleibt aber klein oder
+    // negativ (Schub). Ohne Ausgleich klang das wie Schub. Schneller Drehzahlanstieg = Gasstoß -> Last und kein Schub.
+    if (slope > 900 && rpm > cfg.carIdle + 200) {
+      this.blipUntil = now + 250;
+      this.blip = Math.max(this.blipUntil > now ? this.blip || 0 : 0, clamp((slope - 900) / 2500, 0.25, 0.75));
+    }
+    if (this.blipUntil > now) { load = Math.max(load, this.blip); overrun = false; } else this.blip = 0;
+    // leicht glätten, damit Lastsprünge nicht knacken (steigend schneller als fallend)
+    this.load += (load - this.load) * (load > this.load ? 0.6 : 0.4);
 
     this.emit('sample', {
       rpm: rpm,

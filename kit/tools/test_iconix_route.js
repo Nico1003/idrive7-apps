@@ -156,9 +156,9 @@ test('SmartX: Kanal auflösen, Format aus dem Namen, kein Rückfall auf andere G
   process.env.ICONIX_PYTHON = process.execPath; // irgendein vorhandenes Programm als "Python"
   const c = E.candidates({ device: 'plug:smartx:CarLifeMedia_CF_48_STEREO' });
   assert.strictEqual(c.length, 1);
-  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '70000', '2']);
+  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '40000', '2']);
   const m = E.candidates({ device: 'plug:smartx:Media_Overlay_Converter_Source_CF_24_MONO' });
-  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '70000', '1']);
+  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '40000', '1']);
 });
 
 test('Umrechnung 48 -> 24 kHz: Tiefpass gegen Aliasing, tiefe Töne bleiben', () => {
@@ -233,7 +233,7 @@ test('Schub leiser als Last, ohne Übersteuern', () => {
   const r = drive('v8', 24000, 9, (t) => t < 6 ? { rpm: 1100 + 3700 * t / 6, load: 1, speed: 80 } : { rpm: 4800 - 3200 * (t - 6) / 3, load: 0, overrun: true, speed: 90 });
   const rms = (a) => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
   const wot = rms(r.out.subarray(24000 * 3, 24000 * 6)), ovr = rms(r.out.subarray(24000 * 6.3));
-  assert.ok(ovr < wot * 0.3 && ovr > wot * 0.03, 'Schub ' + ovr.toFixed(3) + ' vs Last ' + wot.toFixed(3));
+  assert.ok(ovr < wot * 0.7 && ovr > wot * 0.1, 'Schub ' + ovr.toFixed(3) + ' vs Last ' + wot.toFixed(3));
   assert.ok(r.peak <= 1);
 });
 
@@ -296,7 +296,7 @@ test('Dienst rendert für einen 24-kHz-Mono-Kanal halb so viele Frames mit 2 Byt
   assert.strictEqual(eng.status().wants, true);
 });
 
-test('Regelkreis mit Rückmeldung des Players: höchstens ~110 ms Ton in der Warteschlange, auch wenn der Kanal hängt', () => {
+test('Regelkreis mit Rückmeldung des Players: Vorlauf begrenzt (Start 120 ms), auch wenn der Kanal hängt', () => {
   const eng = new E.Engine({ log() {} });
   let bytes = 0;
   eng.out = { child: {}, blocked: false, fmt: { rate: 24000, ch: 1 }, step: E.Output.prototype.step, list: [], opts: { device: 'x' },
@@ -306,10 +306,10 @@ test('Regelkreis mit Rückmeldung des Players: höchstens ~110 ms Ton in der War
   eng.t0 = Date.now() - 5000; eng.written = 0;
   for (let i = 0; i < 20; i++) eng._tick();               // Kanal spielt nichts ab (z. B. noch nicht verbunden)
   const queuedMs = (bytes / 2) / 24000 * 1000;
-  assert.ok(queuedMs <= E.FB_LEAD_MS + 1 && queuedMs > 50, 'Warteschlange ' + queuedMs.toFixed(0) + ' ms');
+  assert.ok(queuedMs <= E.FB_LEAD_START + 1 && queuedMs > 50, 'Warteschlange ' + queuedMs.toFixed(0) + ' ms');
   eng.out.played = bytes / 2;                                // alles gespielt -> genau ein Vorlauf wird nachgelegt
   const before = bytes; eng._tick();
-  assert.ok(Math.abs((bytes - before) / 2 / 24 - E.FB_LEAD_MS) < 2, 'nachgelegt ' + ((bytes - before) / 48).toFixed(0) + ' ms');
+  assert.ok(Math.abs((bytes - before) / 2 / 24 - E.FB_LEAD_START) < 2, 'nachgelegt ' + ((bytes - before) / 48).toFixed(0) + ' ms');
 });
 
 test('Lautstärke: sanftere Kurve und Kompressor heben Konstantfahrt an, Vollgas übersteuert nicht', () => {
@@ -320,6 +320,56 @@ test('Lautstärke: sanftere Kurve und Kompressor heben Konstantfahrt an, Vollgas
   const cruise = lvl(0.6, 0.15), full = lvl(1, 1);
   assert.ok(cruise.rms > 0.03, 'Konstantfahrt bei 60 %: RMS ' + cruise.rms.toFixed(3));
   assert.ok(full.pk <= 1, 'Vollgas: Spitze ' + full.pk.toFixed(2));
+});
+
+test('Runterschalten: Zwischengas (Drehzahl springt hoch, Moment negativ) klingt nach Gasstoß, nicht nach Schub', () => {
+  const VehicleFeed = require(path.join(ROOT, 'apps/iconix_sounds/vehicle_feed.js'));
+  const feed = new VehicleFeed(null, { info() {}, warn() {} }, () => ({ loadSource: 'auto', maxTorque: 400, carIdle: 800 }));
+  const out = [];
+  feed.on('sample', (x) => out.push(x));
+  const realNow = Date.now;
+  let t = 1e12;
+  Date.now = () => t;
+  try {
+    feed.v.torque = -20; feed.v.torqueAt = t; feed.v.speed = 60; feed.v.speedAt = t;
+    for (let i = 0; i < 10; i++) { t += 50; feed.v.rpm = 1800; feed.v.torqueAt = t; feed._sample(); }   // Schub
+    assert.ok(out[out.length - 1].overrun, 'vorher Schub');
+    for (let i = 0; i < 6; i++) { t += 50; feed.v.rpm = 1800 + 200 * (i + 1); feed.v.torqueAt = t; feed._sample(); } // Zwischengas
+    const blip = out[out.length - 1];
+    assert.ok(!blip.overrun && blip.load > 0.2, 'beim Zwischengas: overrun ' + blip.overrun + ', Last ' + blip.load.toFixed(2));
+    for (let i = 0; i < 12; i++) { t += 50; feed.v.rpm = 3000; feed.v.torqueAt = t; feed._sample(); }   // wieder Schub
+    assert.ok(out[out.length - 1].overrun, 'danach wieder Schub');
+  } finally { Date.now = realNow; }
+});
+
+test('Autostart: App hat einen Hintergrund-Einstieg (background) und app.json autostart', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/main.js'), 'utf8');
+  assert.ok(/background\(bg\)\s*\{\s*return startCore\(bg\)/.test(src));
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/app.json'), 'utf8')).autostart, true);
+});
+
+test('Vorlauf: Start 120 ms, Aussetzer +30 ms, ruhig wieder knapper bis 70 ms', () => {
+  const eng = new E.Engine({ log() {} });
+  eng.out = { child: {}, blocked: false, fmt: { rate: 24000, ch: 1 }, step: E.Output.prototype.step, list: [], opts: { device: 'x' },
+    played: 0, underruns: 0, write() { return true; }, start() { return true; }, stop() {} };
+  eng.synth.configure({ enabled: true, volume: 0.5 });
+  eng.params({ rpm: 2000, load: 0.5, speed: 50, overrun: false });
+  const realNow = Date.now; let t = realNow();
+  Date.now = () => t;
+  try {
+    eng._tick();
+    assert.strictEqual(eng.fbLead, E.FB_LEAD_START);
+    eng.out.underruns = 1; eng.lastParams = t; eng._tick();
+    assert.strictEqual(eng.fbLead, E.FB_LEAD_START + 30);
+    for (let i = 0; i < 40; i++) { t += 21000; eng.lastParams = t; eng._tick(); }
+    assert.strictEqual(eng.fbLead, E.FB_LEAD_MS);
+  } finally { Date.now = realNow; }
+});
+
+test('Player: Stille-Schutz gegen Leerlaufen und Stille zu Beginn (alsa_play.py)', () => {
+  const py = fs.readFileSync(path.join(ROOT, 'tools/iconix-audiod/alsa_play.py'), 'utf8');
+  assert.ok(/select\.select\(\[fd\]/.test(py) && /snd_pcm_writei\(h, zeros, fill_n\)/.test(py));
+  assert.ok(/os\.write\(1, \('P %d/.test(py), 'Rückmeldung der gespielten Frames');
 });
 
 (async () => {

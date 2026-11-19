@@ -36,7 +36,7 @@ beim Gleiten bleibt er dezent im Hintergrund, im Schub blubbert er leise aus.
   dämpft die Höhen – so wie man einen Motor im Auto wirklich hört.
 - **Keine schrillen Töne, keine Knackser, kein Rauschen.** Kein Turbo-Pfeifen, keine Patscher, kein
   Ansaugrauschen; nichts oberhalb von etwa 2 kHz. Prüfwerkzeuge im Repository messen das automatisch.
-- **Läuft im Hintergrund,** auch wenn die App nicht geöffnet ist, und schont das Head Unit
+- **Startet von selbst** mit dem Auto und läuft im Hintergrund – die App muss nicht geöffnet werden; schont das Head Unit
   (Klangberechnung direkt in 24 kHz, wenige Millisekunden Rechenzeit pro Sekunde Ton).
 
 ### Die Profile
@@ -60,7 +60,7 @@ Konstantfahrt, Teillast):
 ### Bedienung und Einstellungen
 
 - Profil und Lautstärke per Antippen wählen; der iDrive-Knopf und die Lautstärkeregelung des Autos bleiben unangetastet
-- Lautstärke, **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
+- Lautstärke bis 150 % (über 100 % „Boost“: leise Passagen lauter, Spitzen begrenzt), **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
 - Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound bildet das
   echte Drehzahlband auf das Profil ab
 - **Testsound:** 9 Sekunden Leerlauf → Vollgas → Schub, auch im Stand
@@ -94,8 +94,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Iconix Sounds (App) | 0.9.3 |
-| Iconix Audio (Tool) | 0.9.3 |
+| Iconix Sounds (App) | 0.9.4 |
+| Iconix Audio (Tool) | 0.9.4 |
 
 ---
 
@@ -105,7 +105,7 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
   <img src="docs/screens/drive_coach.png" alt="Fahrstil-Coach: Live-Seite mit Wertungsring, Wasserglas, Tipp und Kategorien" width="100%">
 </p>
 
-Die zweite App in diesem Repository (Version 1.0.2) bewertet jede Fahrt live und im Rückblick, ähnlich
+Die zweite App in diesem Repository (Version 1.0.3) bewertet jede Fahrt live und im Rückblick, ähnlich
 einem Fahrlehrer auf dem Beifahrersitz:
 
 - **Wertung von 0 bis 100** aus sieben Kategorien: Vorausschau, Beschleunigen, Kurven, Ruhe,

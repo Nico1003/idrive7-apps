@@ -2,7 +2,7 @@
   "id": "drive_coach",
   "title": "Fahrstil-Coach",
   "description": "Bewertet jede Fahrt: Vorausschau, Beschleunigen, Kurven, Ruhe, Drehzahl, Motorschonung und Leerlauf, mit Wasserglas, Live-Tipps, Verlauf, Level und Abzeichen",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "vendor": "custom",
   "loggingId": "DCO1",
   "iconGlyph": "coach",
