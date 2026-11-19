@@ -27,6 +27,7 @@ SND_PCM_ACCESS_RW_INTERLEAVED = 3
 EPIPE = 32
 ESTRPIPE = 86
 EAGAIN = 11
+SND_PCM_STATE_PREPARED = 2
 
 
 def load_alsa():
@@ -57,6 +58,10 @@ def load_alsa():
     lib.snd_pcm_drain.argtypes = [ctypes.c_void_p]
     lib.snd_pcm_close.argtypes = [ctypes.c_void_p]
     lib.snd_pcm_nonblock.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.snd_pcm_delay.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_long)]
+    lib.snd_pcm_state.argtypes = [ctypes.c_void_p]
+    lib.snd_pcm_start.argtypes = [ctypes.c_void_p]
+    lib.snd_pcm_get_params.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong)]
     lib.snd_device_name_hint.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))]
     lib.snd_device_name_get_hint.restype = ctypes.c_void_p
     lib.snd_device_name_get_hint.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -170,12 +175,30 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
         sys.stderr.write('alsa_play: %s (%s)\n' % (e, dev))
         sys.stderr.flush()
         return 2
-    sys.stderr.write('alsa_play: spielt auf %s mit %d Hz, %d Kanal/Kanäle\n' % (dev, rate, channels))
+    bsize, psize = ctypes.c_ulong(0), ctypes.c_ulong(0)
+    lib.snd_pcm_get_params(h, ctypes.byref(bsize), ctypes.byref(psize))
+    sys.stderr.write('alsa_play: spielt auf %s mit %d Hz, %d Kanal/Kanäle, Puffer %d ms, Periode %d ms\n' % (
+        dev, rate, channels, bsize.value * 1000 // max(1, rate), psize.value * 1000 // max(1, rate)))
     sys.stderr.flush()
     frame_bytes = 2 * channels
     chunk = 1024 * frame_bytes
     stdin = sys.stdin.buffer
     pending = b''
+    # Rückmeldung an engine.js: "P <gespielte Frames>" auf stdout. Damit schreibt der Dienst nur so viel vor,
+    # wie wirklich fehlt – ohne sie staute sich Ton in der Pipe (bis ~1 s Verzögerung).
+    total = 0
+    delay = ctypes.c_long(0)
+
+    def report():
+        # ALSA startet sonst erst bei vollem Puffer; ist der größer als der Vorlauf des Dienstes, bliebe es still
+        if total > 0 and lib.snd_pcm_state(h) == SND_PCM_STATE_PREPARED:
+            lib.snd_pcm_start(h)
+        if lib.snd_pcm_delay(h, ctypes.byref(delay)) < 0:
+            return
+        try:
+            os.write(1, ('P %d\n' % max(0, total - max(0, delay.value))).encode())
+        except OSError:
+            pass
     try:
         while True:
             data = stdin.read1(chunk) if hasattr(stdin, 'read1') else stdin.read(chunk)
@@ -199,6 +222,8 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
                         return 3
                     continue
                 off += w
+                total += w
+            report()
     except (BrokenPipeError, KeyboardInterrupt):
         pass
     finally:

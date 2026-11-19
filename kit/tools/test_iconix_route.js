@@ -156,9 +156,9 @@ test('SmartX: Kanal auflösen, Format aus dem Namen, kein Rückfall auf andere G
   process.env.ICONIX_PYTHON = process.execPath; // irgendein vorhandenes Programm als "Python"
   const c = E.candidates({ device: 'plug:smartx:CarLifeMedia_CF_48_STEREO' });
   assert.strictEqual(c.length, 1);
-  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '80000', '2']);
+  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '70000', '2']);
   const m = E.candidates({ device: 'plug:smartx:Media_Overlay_Converter_Source_CF_24_MONO' });
-  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '80000', '1']);
+  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '70000', '1']);
 });
 
 test('Umrechnung 48 -> 24 kHz: Tiefpass gegen Aliasing, tiefe Töne bleiben', () => {
@@ -294,6 +294,32 @@ test('Dienst rendert für einen 24-kHz-Mono-Kanal halb so viele Frames mit 2 Byt
   assert.ok(eng.written % 2 === 0 && eng.written > 0);
   assert.strictEqual(bytes, eng.written / 2 * 2);
   assert.strictEqual(eng.status().wants, true);
+});
+
+test('Regelkreis mit Rückmeldung des Players: höchstens ~110 ms Ton in der Warteschlange, auch wenn der Kanal hängt', () => {
+  const eng = new E.Engine({ log() {} });
+  let bytes = 0;
+  eng.out = { child: {}, blocked: false, fmt: { rate: 24000, ch: 1 }, step: E.Output.prototype.step, list: [], opts: { device: 'x' },
+    played: 0, write(b) { bytes += b.length; return true; }, start() { return true; }, stop() {} };
+  eng.synth.configure({ enabled: true, volume: 0.5 });
+  eng.params({ rpm: 2000, load: 0.5, speed: 50, overrun: false });
+  eng.t0 = Date.now() - 5000; eng.written = 0;
+  for (let i = 0; i < 20; i++) eng._tick();               // Kanal spielt nichts ab (z. B. noch nicht verbunden)
+  const queuedMs = (bytes / 2) / 24000 * 1000;
+  assert.ok(queuedMs <= E.FB_LEAD_MS + 1 && queuedMs > 50, 'Warteschlange ' + queuedMs.toFixed(0) + ' ms');
+  eng.out.played = bytes / 2;                                // alles gespielt -> genau ein Vorlauf wird nachgelegt
+  const before = bytes; eng._tick();
+  assert.ok(Math.abs((bytes - before) / 2 / 24 - E.FB_LEAD_MS) < 2, 'nachgelegt ' + ((bytes - before) / 48).toFixed(0) + ' ms');
+});
+
+test('Lautstärke: sanftere Kurve und Kompressor heben Konstantfahrt an, Vollgas übersteuert nicht', () => {
+  const lvl = (vol, load) => { const s = new Synth(24000); s.configure({ profile: 'subtle', volume: vol, enabled: true }); s._setProfile('subtle');
+    const f = new Float32Array(4800); let pk = 0, sum = 0, n = 0;
+    for (let k = 0; k < 60; k++) { s.setParams({ rpm: 2200, load, speed: 80 }); s.render(f, 2400); if (k > 30) for (let i = 0; i < 4800; i += 2) { const v = Math.abs(f[i]); pk = Math.max(pk, v); sum += v * v; n++; } }
+    return { pk, rms: Math.sqrt(sum / n) }; };
+  const cruise = lvl(0.6, 0.15), full = lvl(1, 1);
+  assert.ok(cruise.rms > 0.03, 'Konstantfahrt bei 60 %: RMS ' + cruise.rms.toFixed(3));
+  assert.ok(full.pk <= 1, 'Vollgas: Spitze ' + full.pk.toFixed(2));
 });
 
 (async () => {

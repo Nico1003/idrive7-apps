@@ -43,6 +43,9 @@
   var C_EXH = 520;           // Schallgeschwindigkeit im heißen Abgas (m/s)
   var MAXP = 24;             // gleichzeitige Impulse
   var HEADROOM = 0.8;
+  // Kompressor (wie bei Active Sound Design): leise Passagen (Gleiten, Schub, Leerlauf) bis +6 dB lauter,
+  // Vollgas bleibt gleich. Pegel bezogen auf Lautstärke 100 %; Verhältnis 2:1 oberhalb COMP_T.
+  var COMP_T = 0.2, COMP_EXP = 0.5, COMP_MAKEUP = 2.0;
 
   function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
   function finite(x, d) { return (typeof x === 'number' && isFinite(x)) ? x : d; }
@@ -152,6 +155,8 @@
 
     var sr = this.sr;
     function k(sec) { return 1 - Math.exp(-CR / (sr * sec)); }
+    this.kRel = Math.exp(-CR / (sr * 0.3)); this.kCompUp = k(0.25);
+    this.prePk = 0; this.cEnv = 0; this.comp = COMP_MAKEUP;
     this.kR = k(0.05); this.kL = k(0.07); this.kS = k(0.2); this.kG = k(0.12); this.kV = k(0.1);
 
     // Impuls-Pool
@@ -269,13 +274,20 @@
     }
     var p = this.profile;
     var tgtGain = (c.enabled && !this.stale && !this.pending) ? 1 : 0;
-    var tgtVol = c.volume * c.volume * (p.gain || 1) * (c.sport ? 1.3 : 1);
+    // Lautstärkekurve v^1,5 (vorher v²): 60 % klingen jetzt wie früher ~70 %
+    var vk = (p.gain || 1) * (c.sport ? 1.3 : 1);
+    var tgtVol = Math.pow(c.volume, 1.5) * vk;
+    // Hüllkurve des Pegels (Spitze je Block, ~300 ms Abklingen) -> Kompressionsfaktor
+    var lev = this.prePk * vk * HEADROOM; this.prePk = 0;
+    this.cEnv = lev > this.cEnv ? lev : this.cEnv * this.kRel;
+    var cg = (this.cEnv > COMP_T ? Math.pow(COMP_T / this.cEnv, COMP_EXP) : 1) * COMP_MAKEUP;
+    this.comp += (cg - this.comp) * (cg < this.comp ? 0.5 : this.kCompUp);
     this.rpm += ((p.kind === 'electric' ? 0 : this._virtualRpm(this.target.rpm)) - this.rpm) * this.kR;
     this.load += (this.target.load - this.load) * this.kL;
     this.speed += (this.target.speed - this.speed) * this.kS;
     this.gain += (tgtGain - this.gain) * this.kG;
     this.vol += (tgtVol - this.vol) * this.kV;
-    var newAmp = this.gain * this.vol * HEADROOM;
+    var newAmp = this.gain * this.vol * HEADROOM * this.comp;
     if (newAmp < 1e-5 && tgtGain === 0) newAmp = 0;
     this.ampStep = (newAmp - this.amp) / CR;
     if (p.kind === 'electric') this._controlElec(); else this._controlComb();
@@ -373,7 +385,7 @@
     var dph = this.dph, rip = this.rip, phase = this.phase, dist = this.dist, next = this.next;
     var unevT = this.unevW * 0.22 / Math.max(N, 1), uTime = P.uTime;
     var amp = this.amp, ampStep = this.ampStep, drive = this.drive, dn = this.driveNorm;
-    var seed = this.seed | 0, peak = 0, bad = false;
+    var seed = this.seed | 0, peak = 0, pre = 0, bad = false;
     var k, j, r, white, nz1 = this.nz1, nz2 = this.nz2, in0, in1, y, s, a, o = off * 2, e, d, step, hi;
     var bump = this.bump, bumpK = 1 - 1 / (this.sr * 0.08);
     var vib1 = this.vib1, vib2 = this.vib2, kVib = this.kVib, bark = this.bark, exMix = this.exMix, vibMix = this.vibMix;
@@ -439,6 +451,7 @@
       y = s * drive;
       s = y / (1 + (y < 0 ? -y : y)) * dn;
       s = fG.run(s);
+      a = s < 0 ? -s : s; if (a > pre) pre = a;
       amp += ampStep;
       s *= amp;
       if (s !== s) { s = 0; bad = true; } else if (s > 0.8 || s < -0.8) s = softLimit(s);
@@ -451,6 +464,7 @@
     this.vib1 = vib1; this.vib2 = vib2;
     this.hLp0 = hLp0; this.hLp1 = hLp1; this.pLp = pLp; this.pLp2 = pLp2; this.cLp = cLp; this.radLp = radLp; this.yPrev = yPrev;
     this.amp = amp; this.seed = seed;
+    if (pre > this.prePk) this.prePk = pre;
     if (bad || pLp !== pLp || cLp !== cLp) this._reset();
     return peak;
   };
@@ -463,7 +477,7 @@
     var sPh = this.subPh, sInc = this.subInc, sW = this.subW, level = this.eLevel;
     var fE = this.fElec, fE2 = this.fElec2, fBoom = this.fBoom, fCab = this.fCabin, fG = this.fGuard, fG2 = this.fGuard2, fDc = this.fDc;
     var amp = this.amp, ampStep = this.ampStep, drive = this.drive, dn = this.driveNorm;
-    var peak = 0, bad = false, k, j, x, dt, t, saw, sum, s, y, a, o = off * 2;
+    var peak = 0, pre = 0, bad = false, k, j, x, dt, t, saw, sum, s, y, a, o = off * 2;
     for (k = 0; k < n; k++) {
       sum = 0;
       for (j = 0; j < V; j++) {
@@ -479,12 +493,14 @@
       s = fDc.run(s); s = fBoom.run(s); s = fCab.run(s);
       y = s * drive; s = y / (1 + (y < 0 ? -y : y)) * dn;
       s = fG.run(s);
+      a = s < 0 ? -s : s; if (a > pre) pre = a;
       amp += ampStep; s *= amp;
       if (s !== s) { s = 0; bad = true; } else if (s > 0.8 || s < -0.8) s = softLimit(s);
       out[o++] = s; out[o++] = s;
       a = s < 0 ? -s : s; if (a > peak) peak = a;
     }
     this.subPh = sPh; this.amp = amp;
+    if (pre > this.prePk) this.prePk = pre;
     if (bad) this._reset();
     return peak;
   };

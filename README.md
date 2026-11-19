@@ -59,7 +59,7 @@ Konstantfahrt, Teillast):
 
 ### Bedienung und Einstellungen
 
-- Profil per Antippen oder iDrive-Controller wählen (drehen = Lautstärke, drücken = nächster Sound)
+- Profil und Lautstärke per Antippen wählen; der iDrive-Knopf und die Lautstärkeregelung des Autos bleiben unangetastet
 - Lautstärke, **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
 - Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound bildet das
   echte Drehzahlband auf das Profil ab
@@ -94,8 +94,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Iconix Sounds (App) | 0.9.2 |
-| Iconix Audio (Tool) | 0.9.2 |
+| Iconix Sounds (App) | 0.9.3 |
+| Iconix Audio (Tool) | 0.9.3 |
 
 ---
 

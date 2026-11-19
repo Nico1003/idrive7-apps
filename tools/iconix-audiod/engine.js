@@ -24,11 +24,14 @@ const IDLE_TICK_MS = 200;    // ohne Ton nur 5 Wakeups/s; neue Fahrzeugdaten ode
 // so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter des Head Units sein). 160 ms gibt Reserve,
 // wenn Node auf dem Head Unit kurz hängt (GC, andere Apps) – sonst knackt/stottert es (Underrun).
 const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
+// Mit Rückmeldung des Players (alsa_play.py meldet gespielte Frames): so viel Ton steht höchstens an
+// (ALSA-Puffer + Pipe). Das ist die Verzögerung zwischen Fahrzeugdaten und Lautsprecher.
+const FB_LEAD_MS = Number(process.env.ICONIX_FB_LEAD_MS) || 110;
 const BUFFER_US = Number(process.env.ICONIX_BUFFER_US) || 200000; // Puffer des Abspielprogramms
 const STALE_MS = 1500;       // ohne Daten -> ausblenden
 const IDLE_STOP_MS = 8000;   // so lange still -> Abspielprogramm beenden (gibt das Audiogerät frei)
 const MAX_CHUNK = 4096;
-const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 80000; // SmartX: kurzer Puffer
+const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 70000; // SmartX: kurzer Puffer
 const SMARTX_RETRY_MS = 3000; // SmartX-Kanal ließ sich nicht öffnen -> so oft erneut probieren
 
 // ---------------------------------------------------------------------------
@@ -175,7 +178,7 @@ function candidates(opts) {
     if (!py || !fs.existsSync(ALSA_SCRIPT)) return out;
     const f = formatOf(opts.device);
     out.push({ name: 'alsa:' + opts.device, path: py, argv: [ALSA_SCRIPT, 'play', opts.device, String(f.rate), String(SMARTX_BUFFER_US), String(f.ch)],
-      device: opts.device, fmt: f, smartx: true });
+      device: opts.device, fmt: f, smartx: true, pos: true });
     return out;
   }
   if (py && fs.existsSync(ALSA_SCRIPT) && (hasLibasound() || process.env.ICONIX_ALSA_FORCE)) {
@@ -184,7 +187,7 @@ function candidates(opts) {
       // "name@/pfad/zur/alsa.conf" = Gerät aus BMWs eigener ALSA-Konfiguration (ALSA_CONFIG_PATH)
       const at = d.indexOf('@/');
       const name = at > 0 ? d.slice(0, at) : d, cfg = at > 0 ? d.slice(at + 1) : null;
-      out.push({ name: 'alsa:' + d, path: py, argv: [ALSA_SCRIPT, 'play', name, String(RATE), String(BUFFER_US)], device: d,
+      out.push({ name: 'alsa:' + d, path: py, argv: [ALSA_SCRIPT, 'play', name, String(RATE), String(BUFFER_US)], device: d, pos: true,
         env: cfg ? { ALSA_CONFIG_PATH: cfg } : null });
     });
   }
@@ -230,6 +233,7 @@ function Output(onState, log, opts) {
   this.error = this.list.length ? null : (isSmartx(this.opts.device) ? 'Python/alsa_play.py fehlt für SmartX' : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose');
   this.lastErr = '';
   this.fmt = { rate: RATE, ch: 2 };
+  this.played = null;
 }
 
 Output.prototype.start = function () {
@@ -244,7 +248,7 @@ Output.prototype.start = function () {
   log('starte ' + b.name + ' ' + b.path + ' ' + b.argv.join(' '));
   let child;
   try {
-    child = cp.spawn(b.path, b.argv, { stdio: ['pipe', 'ignore', 'pipe'], env: b.env ? Object.assign({}, process.env, b.env) : process.env });
+    child = cp.spawn(b.path, b.argv, { stdio: ['pipe', b.pos ? 'pipe' : 'ignore', 'pipe'], env: b.env ? Object.assign({}, process.env, b.env) : process.env });
   } catch (e) {
     this.bad[b.name] = true; this.lastErr = e.message; this.onState();
     return false;
@@ -256,6 +260,20 @@ Output.prototype.start = function () {
   this.dec = new Decimator(Math.round(RATE / (this.fmt.rate || RATE)));
   this.blocked = false;
   this.error = null;
+  // gespielte Frames (Ausgaberate) laut Player; null = Player meldet nichts -> Takt nach Uhr
+  this.played = b.pos ? 0 : null;
+  this.startedAt = startedAt; this.gotPos = false;
+  if (b.pos && child.stdout) {
+    let rest = '';
+    child.stdout.setEncoding('ascii');
+    child.stdout.on('data', function (d) {
+      if (self.child !== child) return;
+      const lines = (rest + d).split('\n'); rest = lines.pop();
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].charAt(0) === 'P') { const v = Number(lines[i].slice(2)); if (isFinite(v)) { self.played = v; self.gotPos = true; break; } }
+      }
+    });
+  }
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', function (d) {
     const line = String(d).trim().split('\n').pop();
@@ -513,7 +531,7 @@ Engine.prototype.status = function () {
     ok: !out.error,
     backend: out.backend || (out.list[0] && !out.error ? out.list[0].name : null),
     rate: RATE, playing: !!out.child, error: out.error, profile: this.synth.cfg.profile,
-    underruns: out.underruns || 0, late: this.late, leadMs: LEAD_MS,
+    underruns: out.underruns || 0, late: this.late, leadMs: out.played != null && out.child ? FB_LEAD_MS : LEAD_MS,
     players: out.list.map(function (b) { return b.name; }),
     device: this.device, resolved: out.opts.device, python: findPython(),
     wants: !!this.wantSound, outRate: out.fmt.rate, outCh: out.fmt.ch,
@@ -594,9 +612,21 @@ Engine.prototype._tick = function () {
   }
   if (!out.child) return;
 
-  let due = Math.floor((now - this.t0 + LEAD_MS) / 1000 * RATE) - this.written;
-  if (due > RATE / 2) { this.t0 = now; this.written = 0; due = Math.floor(LEAD_MS / 1000 * RATE); } // Resync nach Hänger
   const step = out.step();
+  let due;
+  // Player meldet nach 1,5 s noch nichts (alte alsa_play.py?) -> zurück zum Takt nach Uhr statt still zu bleiben
+  if (out.played === 0 && !out.gotPos && out.startedAt && now - out.startedAt > 1500) {
+    out.played = null; this.t0 = now; this.written = 0;
+    this.log(out.backend + ': keine Rückmeldung vom Player – Takt nach Uhr');
+  }
+  if (out.played != null) {
+    // Regelkreis: nur nachschreiben, was bis zum Ziel-Vorlauf fehlt (geschrieben − gespielt = was ansteht)
+    const queued = this.written / step - out.played;
+    due = Math.floor((FB_LEAD_MS / 1000 * RATE / step - queued)) * step;
+  } else {
+    due = Math.floor((now - this.t0 + LEAD_MS) / 1000 * RATE) - this.written;
+    if (due > RATE / 2) { this.t0 = now; this.written = 0; due = Math.floor(LEAD_MS / 1000 * RATE); } // Resync nach Hänger
+  }
   // Kanal mit niedrigerer Rate (24 kHz): Synthese direkt in dieser Rate – halbe Rechenzeit, kein Umrechnen
   const direct = step > 1 && RATE % step === 0;
   if (direct && synth.sr !== RATE / step) this._rebuildSynth(RATE / step);
@@ -834,5 +864,5 @@ module.exports = {
   probeSmartx: probeSmartx, smartxLines: smartxLines, usable: usable,
   Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, toPcmFmt: toPcmFmt, Decimator: Decimator, sweepAt: sweepAt,
   smartxEndpoints: smartxEndpoints, resolveSmartx: resolveSmartx, formatOf: formatOf, isSmartx: isSmartx,
-  RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
+  RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, FB_LEAD_MS: FB_LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };

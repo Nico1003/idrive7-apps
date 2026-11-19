@@ -2,14 +2,14 @@
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
   "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), Tonweg zum Testen wählbar. Braucht das Tool Iconix Audio.",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
   "mguHmi": ["ID7", "ID8"],
   "autostart": true,
   "requires": {
-    "iconix-audiod": "0.9.2"
+    "iconix-audiod": "0.9.3"
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -126,12 +126,6 @@
       "label": "Im Stand stumm",
       "type": "bool",
       "default": false
-    },
-    {
-      "key": "dialVolume",
-      "label": "iDrive-Drehen = Lautstaerke",
-      "type": "bool",
-      "default": true
     },
     {
       "key": "route",

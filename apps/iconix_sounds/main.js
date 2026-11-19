@@ -22,11 +22,11 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.2';
+const VERSION = '0.9.3';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, sport: false,
-  muteParked: false, dialVolume: true, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -75,7 +75,7 @@ function startCore(host) {
     // Gerät für den Dienst: SmartX-Kanal des Tonwegs, bei "ALSA direkt" das frühere Ausgabegerät
     const rt = CarRoute.route(synthCfgCache.route);
     synthCfgCache.device = rt.device || String(g('alsaDevice') || 'auto');
-    uiCfg = { muteParked: bool(g('muteParked')), dialVolume: bool(g('dialVolume')) };
+    uiCfg = { muteParked: bool(g('muteParked')) };
   };
   refresh();
 
@@ -147,31 +147,6 @@ function kitGfx(c) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// iDrive-Controller: ctx.controller.onInput liefert die Felder von FrontCCU.statusRotaryEncoderState
-// (Enums als Zahlen). Auswertung wie im Kit (kit/runtime/display.js _ccu):
-//   frontRotaryEncoderOperation  16-Bit-Zähler (Drehung = Differenz, |d| > 64 = Zähler-Reset)
-//   frontRotaryEncoderPushButton 1/2 = gedrückt (nur die Flanke zählt), 15 + Deflection 15 = kein Controller
-// Die ersten 20 Ereignisse werden geloggt (data/iconix_sounds.log).
-// ---------------------------------------------------------------------------
-function makeInputDecoder(log) {
-  let last = null, logged = 0;
-  const down = x => x === 1 || x === 2;
-  return function decode(ev) {
-    if (logged < 20) { logged++; try { log.info('iconix: input ' + JSON.stringify(ev)); } catch (e) { /* egal */ } }
-    if (!ev || typeof ev !== 'object') return { rotate: 0, press: false };
-    const k = Number(ev.frontRotaryEncoderOperation), pb = Number(ev.frontRotaryEncoderPushButton), df = Number(ev.frontRotaryEncoderDeflection);
-    if (pb === 15 && df === 15) return { rotate: 0, press: false }; // kein Controller dahinter
-    let rotate = 0;
-    if (last && isFinite(k) && isFinite(last.k)) {
-      rotate = ((k - last.k + 32768) & 0xffff) - 32768;
-      if (rotate > 64 || rotate < -64) rotate = 0; // Zähler-Reset
-    }
-    const press = down(pb) && !(last && down(last.pb));
-    last = { k, pb };
-    return { rotate: Math.max(-5, Math.min(5, rotate)), press };
-  };
-}
 
 // Statuszeile: Dienst + Tonweg; neues Objekt nur, wenn sich etwas ändert
 let audioCache = { key: '', val: null };
@@ -255,24 +230,11 @@ mgu.run({
     //  - "Kit führt den Bildschirm" (cv.own: GPU-Renderer mit Touch-Weiterleitung): Touch und der iDrive-Knopf
     //    gehen über die Ziele aus cv.target(...) – Drehen wandert über Chips/Knöpfe/Leiste, Drücken löst aus.
     //    ctx.controller.onInput bekommt dann nichts (das Kit wertet den Knopf selbst aus).
-    //  - sonst: kein Touch auf der Seite möglich; der Knopf kommt per grab/onInput (Drehen = Lautstärke).
-    const decode = makeInputDecoder(log);
-    let grabbed = false, visible = false, own = false;
-    const grab = on => {
-      if (!ctx.controller || grabbed === on) return;
-      try { ctx.controller.grab(on); grabbed = on; } catch (e) { log.warn('iconix: grab: ' + e.message); }
-    };
-    const updateGrab = () => grab(visible && !own && c.ui().dialVolume);
-    if (ctx.controller && ctx.controller.onInput) {
-      ctx.controller.onInput(ev => {
-        const i = decode(ev);
-        if (i.rotate) changeVolume(i.rotate);
-        if (i.press) nextProfile();
-      });
-    }
-    if (ctx.ui.onVisible) {
-      ctx.ui.onVisible((name, v) => { if (name === 'MAIN') { visible = v; updateGrab(); } });
-    }
+    //  - sonst: Bedienung über die Knöpfe der Seite (Sound wechseln, Stumm, Testsound) und die Einstellungen.
+    // Der iDrive-Knopf wird bewusst NICHT mehr belegt (controller.grab): Er blieb sonst auch außerhalb der App
+    // gefangen und regelte nur noch Iconix statt der Musik.
+    let own = false;
+    if (ctx.controller && ctx.controller.grab) { try { ctx.controller.grab(false); } catch (e) { /* egal */ } }
     // Rückfall: Tippen ohne Ziel (falls ein Kit-Stand Taps nur über onTap liefert)
     if (ctx.onTap) {
       ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y, !!diag); if (h) act(h); });
@@ -283,7 +245,6 @@ mgu.run({
     // Mit GPU-Renderer ruft das Kit die Schleife bis zu 60x/s; ein Frame ohne Änderung wird nicht gesendet.
     // Ohne Renderer (PNG-Weg) gilt die angefragte Rate: 20 fps reichen für die Drehzahlanzeige.
     // Das Zustandsobjekt wird wiederverwendet (keine Allokation pro Frame).
-    const HINT_DIAL = 'Drehen: Lautstärke · Drücken: Sound wechseln';
     const HINT_TOUCH = 'Antippen oder iDrive: Sound und Lautstärke wählen';
     // Nur neu zeichnen, wenn sich etwas Sichtbares ändert: höchstens 30 Bilder/s beim Fahren, sonst 1/s.
     // Der GPU-Renderer ruft die Schleife bis zu 60x/s auf – ohne diese Bremse würde jedes Mal gezeichnet.
@@ -300,15 +261,13 @@ mgu.run({
       lastKey = key; lastDraw = now;
       const cv = ctx.canvas(UI.W, UI.H);
       const g = kitGfx(cv);
-      visible = true;
       if (!!cv.own !== own) { own = !!cv.own; log.info('iconix: Kit führt den Bildschirm: ' + own); lastKey = ''; }
-      updateGrab();
       st.profile = cfg.profile;
       st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0; st.load = s ? s.load : 0;
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
       st.sport = cfg.sport; st.demo = !s;
       st.audio = a;
-      st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
+      st.hint = own ? HINT_TOUCH : '';
       st.diag = diag;
       UI.draw(g, st);
       // Ziele nach dem Zeichnen registrieren (wie apps/dyno, live_data: nur wenn cv.own)
