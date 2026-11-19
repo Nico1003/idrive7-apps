@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
@@ -99,7 +99,9 @@ function runDaemon() {
         log('SmartX: ' + JSON.stringify(sx));
         const r = E.probeAudio();
         log('Diagnose: ' + JSON.stringify(r));
-        lines = E.smartxLines(sx).concat(['--- Allgemein (root) ---'], E.diagLines(r, []));
+        const eps = E.smartxEndpoints();
+        lines = ['--- Ausgabe ---', 'Gerät: ' + engine.device + ' -> ' + engine.status().resolved,
+          'SmartX-Kanäle (Wiedergabe): ' + (eps.length ? eps.join(', ') : 'keine in /dev/shm')].concat(E.smartxLines(sx)).concat(['--- Allgemein (root) ---'], E.diagLines(r, []));
       } catch (e) { lines = ['Diagnose fehlgeschlagen: ' + e.message]; }
       const msg = JSON.stringify({ op: 'diag', lines: lines }) + '\n';
       clients.forEach(function (c) { try { c.write(msg); } catch (e) { /* egal */ } });

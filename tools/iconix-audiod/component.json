@@ -1,9 +1,9 @@
 {
   "id": "iconix-audiod",
   "kind": "tool",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "title": "Iconix Audio",
-  "description": "Experimenteller Audio-Dienst für die App Iconix Sounds: erzeugt den Motor-Sound und gibt ihn über ein vorhandenes Abspielprogramm aus.",
+  "description": "Experimenteller Audio-Dienst für die App Iconix Sounds: erzeugt den Motor-Sound und gibt ihn über SmartX-Kanäle (Audiomanager-Weg der App) oder ALSA aus.",
   "mguHmi": ["ID7", "ID8"],
   "optional": true,
   "uninstallable": true,

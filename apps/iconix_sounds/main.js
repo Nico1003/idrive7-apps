@@ -7,8 +7,10 @@
  *   - Bildschirm zeichnen (ui.js – identisch zum PC-Simulator)
  *   - Bedienung: iDrive drehen = Lautstärke, drücken = nächster Sound, Buttons, Einstellungen
  *
- * Der Ton selbst entsteht im Tool "iconix-audiod" (Root-Dienst), weil Store-Apps keine
- * Audio-Schnittstelle haben.
+ * Der Ton selbst entsteht im Tool "iconix-audiod" (Root-Dienst) und wird in einen SmartX-Kanal geschrieben.
+ * Hörbar wird er erst, wenn der BMW-Audiomanager die passende Quelle mit den Lautsprechern verbindet – das
+ * fordert die App an (car_route.js), sobald der Dienst Ton ausgeben will. Der Weg ist in den Einstellungen
+ * wählbar ("Tonweg"), damit sich im Auto mehrere Varianten nacheinander testen lassen.
  *
  * Die Kit-Aufrufe sind gegen idrive7-apps (kit/runtime/mgu.js, record.js, display.js, signals.js,
  * apps/redline/main.js) abgeglichen.
@@ -18,11 +20,13 @@ const Profiles = require('./profiles');
 const UI = require('./ui');
 const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
+const CarRoute = require('./car_route');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
+const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, pops: false, sport: false,
-  muteParked: false, dialVolume: true, loadSource: 'auto', alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, dialVolume: true, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -66,8 +70,12 @@ function startCore(host) {
       sport: bool(g('sport')),
       carIdle: feedCfg.carIdle,
       carRedline: num(g('carRedline'), 4800),
-      device: String(g('alsaDevice') || 'auto')
+      route: CarRoute.ROUTES[String(g('route'))] ? String(g('route')) : CarRoute.DEFAULT_ROUTE,
+      device: 'auto'
     };
+    // Gerät für den Dienst: SmartX-Kanal des Tonwegs, bei "ALSA direkt" das frühere Ausgabegerät
+    const rt = CarRoute.route(synthCfgCache.route);
+    synthCfgCache.device = rt.device || String(g('alsaDevice') || 'auto');
     uiCfg = { muteParked: bool(g('muteParked')), dialVolume: bool(g('dialVolume')) };
   };
   refresh();
@@ -87,9 +95,20 @@ function startCore(host) {
   pushCfg();
   link.connect();
   feed.start();
-  log.info('iconix: Kern gestartet, Version ' + VERSION);
 
-  core = { link, feed, pushCfg, synthCfg, ui: () => uiCfg, log, last: () => last };
+  // Audiomanager-Verbindung, solange der Dienst Ton ausgeben will (Fahrt, Testsound) und kurz danach
+  const route = new CarRoute(host.signals, log, host.dataDir);
+  let lastSound = 0;
+  setInterval(() => {
+    const ds = link.connected ? link.daemonStatus : (link.local ? link.localStatus : null);
+    const now = Date.now();
+    if (ds && (ds.wants || ds.playing)) lastSound = now;
+    route.want(synthCfgCache.route, lastSound > 0 && now - lastSound < ROUTE_GRACE_MS);
+  }, 500);
+  route.start();
+  log.info('iconix: Kern gestartet, Version ' + VERSION + ', Tonweg ' + synthCfgCache.route);
+
+  core = { link, feed, route, pushCfg, synthCfg, ui: () => uiCfg, log, last: () => last };
   return core;
 }
 
@@ -154,6 +173,34 @@ function makeInputDecoder(log) {
   };
 }
 
+// Statuszeile: Dienst + Tonweg; neues Objekt nur, wenn sich etwas ändert
+let audioCache = { key: '', val: null };
+function audioStatus(c) {
+  const a = c.link.status, r = c.route.short();
+  const key = a.text + '|' + a.ok + '|' + r;
+  if (key !== audioCache.key) {
+    const routeOk = !c.route.needsAm() || c.route.state === 'verbunden' || c.route.state === 'aus';
+    audioCache = { key, val: { ok: a.ok && routeOk, text: r + ' · ' + a.text.replace(/^Audio: /, '') } };
+  }
+  return audioCache.val;
+}
+
+// Diagnosezeilen auf Bildschirmbreite umbrechen (~68 Zeichen)
+function wrapLines(lines) {
+  const out = [];
+  lines.forEach(l => {
+    let s = String(l);
+    while (s.length > 68) {
+      const cut = Math.max(s.lastIndexOf(', ', 68), s.lastIndexOf(' ', 68));
+      const i = cut > 20 ? cut + 1 : 68;
+      out.push(s.slice(0, i));
+      s = '   ' + s.slice(i).replace(/^\s+/, '');
+    }
+    out.push(s);
+  });
+  return out;
+}
+
 mgu.run({
   async start(ctx) {
     const c = startCore(ctx);
@@ -177,11 +224,18 @@ mgu.run({
     ctx.ui.onClick('BTN_MUTE', () => set('enabled', !bool(get('enabled'))));
     ctx.ui.onClick('BTN_TEST', () => c.link.test());
     // Audio-Diagnose: zeigt, welche Tonwege es auf diesem Head Unit gibt (an-/ausschalten)
-    let diag = null;
-    const openDiag = () => { diag = { lines: c.link.diagnose(), page: 0 }; };
+    // Oben der Tonweg (Audiomanager: Verbindungen, Quellen, Senken – kommt asynchron), darunter Dienst und App.
+    let diag = null, routeLines = ['--- Tonweg (Audiomanager) ---', '(wird abgefragt ...)'];
+    const diagText = linkLines => wrapLines(routeLines.concat(linkLines));
+    const openDiag = () => {
+      const d = diag = { linkLines: c.link.diagnose(), page: 0 };
+      d.lines = diagText(d.linkLines);
+      c.route.diagLines().then(l => { routeLines = l; if (diag === d) d.lines = diagText(d.linkLines); },
+        e => { routeLines = ['Tonweg-Diagnose: ' + e]; });
+    };
     ctx.ui.onClick('BTN_DIAG', () => { if (diag) diag = null; else openDiag(); });
     // Antwort des Dienstes (root) nachreichen
-    c.link.on('diag', () => { if (diag) diag.lines = c.link.diagnose(false); });
+    c.link.on('diag', () => { if (diag) { diag.linkLines = c.link.diagnose(false); diag.lines = diagText(diag.linkLines); } });
 
     // Bedienbare Flächen (Profil-Chips, Lautstärke −/+, Stumm) – Geometrie aus ui.js
     const act = h => {
@@ -242,7 +296,7 @@ mgu.run({
       st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0; st.load = s ? s.load : 0;
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
       st.sport = cfg.sport; st.pops = cfg.pops; st.demo = !s;
-      st.audio = c.link.status;
+      st.audio = audioStatus(c);
       st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
       st.diag = diag;
       UI.draw(g, st);

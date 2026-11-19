@@ -1,15 +1,15 @@
 {
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
-  "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Die Tonausgabe übernimmt das Tool iconix-audiod (experimentell).",
-  "version": "0.5.0",
+  "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), Tonweg zum Testen wählbar. Braucht das Tool Iconix Audio.",
+  "version": "0.6.0",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
   "mguHmi": ["ID7", "ID8"],
   "autostart": true,
   "requires": {
-    "idrive7-renderd": "2.1.15"
+    "iconix-audiod": "0.6.0"
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -25,6 +25,16 @@
     "de.bmw.powertrain.AcceleratorPedal": {
       "AngleAcceleratorPedal": "s",
       "_optional": "Gaspedal als Lastquelle (Skalierung unbestätigt)"
+    },
+    "org.genivi.am.commandinterface.CommandControl": {
+      "_instances": "1",
+      "_methods": ["connect", "disconnect", "getListMainConnections", "getListMainSources", "getListMainSinks"],
+      "_optional": "Ton auf den Fahrzeuglautsprechern (Audiomanager-Verbindung)"
+    },
+    "org.genivi.am.routinginterface.RoutingControlObserver": {
+      "_instances": "1",
+      "_methods": ["hookSourceAvailablityStatusChange"],
+      "_optional": "CarLife-Quellen als verfügbar melden"
     }
   },
   "screens": [
@@ -130,8 +140,23 @@
       "default": true
     },
     {
+      "key": "route",
+      "label": "Tonweg (zum Testen)",
+      "type": "choice",
+      "default": "overlay",
+      "options": [
+        ["overlay", "1 Overlay-Mix (Musik laeuft weiter)"],
+        ["carlife", "2 CarLife exklusiv (Musik pausiert)"],
+        ["carlifeNav", "3 CarLife-Navi-Mix"],
+        ["overlayMain", "4 Overlay auf MainSink"],
+        ["carlifeMain", "5 CarLife auf MainSink"],
+        ["carplay", "6 CarPlay-Kanal (ohne Audiomanager)"],
+        ["alsa", "7 ALSA direkt (Ausgabegeraet unten)"]
+      ]
+    },
+    {
       "key": "alsaDevice",
-      "label": "Ausgabegeraet",
+      "label": "Ausgabegeraet (nur Tonweg 7)",
       "type": "choice",
       "default": "auto",
       "options": [["auto", "Automatisch"], ["default", "default"], ["plughw:0,0", "plughw:0,0"], ["plughw:0,1", "plughw:0,1"], ["scan1", "Geraet 1 (Diagnose)"], ["scan2", "Geraet 2 (Diagnose)"], ["scan3", "Geraet 3 (Diagnose)"], ["scan4", "Geraet 4 (Diagnose)"], ["scan5", "Geraet 5 (Diagnose)"], ["scan6", "Geraet 6 (Diagnose)"]]

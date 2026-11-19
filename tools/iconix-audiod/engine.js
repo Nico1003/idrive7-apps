@@ -17,8 +17,9 @@ const path = require('path');
 const cp = require('child_process');
 const Synth = require('./synth');
 
-const RATE = Number(process.env.ICONIX_RATE) || 44100;
-const TICK_MS = 20;          // 50 Wakeups/s (Blöcke à 882 Samples) – schont die CPU
+// Synthese-Rate: 48 kHz wie die SmartX-Kanäle des Head Units (24-kHz-Kanäle bekommen je 2 Frames gemittelt)
+const RATE = Number(process.env.ICONIX_RATE) || 48000;
+const TICK_MS = 20;          // 50 Wakeups/s (Blöcke à 960 Samples) – schont die CPU
 // so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter des Head Units sein). 160 ms gibt Reserve,
 // wenn Node auf dem Head Unit kurz hängt (GC, andere Apps) – sonst knackt/stottert es (Underrun).
 const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
@@ -26,6 +27,8 @@ const BUFFER_US = Number(process.env.ICONIX_BUFFER_US) || 200000; // Puffer des 
 const STALE_MS = 1500;       // ohne Daten -> ausblenden
 const IDLE_STOP_MS = 8000;   // so lange still -> Abspielprogramm beenden (gibt das Audiogerät frei)
 const MAX_CHUNK = 4096;
+const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 80000; // SmartX: kurzer Puffer
+const SMARTX_RETRY_MS = 3000; // SmartX-Kanal ließ sich nicht öffnen -> so oft erneut probieren
 
 // ---------------------------------------------------------------------------
 // Abspielprogramme
@@ -112,6 +115,43 @@ const ALSA_SCRIPT = path.join(__dirname, 'alsa_play.py');
 // Geräte, die "auto" der Reihe nach probiert (das erste, das sich öffnen lässt, gewinnt)
 const AUTO_DEVICES = ['default', 'plughw:0,0', 'plughw:0,1'];
 
+// ---------------------------------------------------------------------------
+// SmartX-Kanäle (Intel IAS SmartXbar): jeder Kanal hat in /dev/shm "smartx_<Kanal>_p_connection".
+// Geschrieben wird über ALSA "plug:smartx:<Kanal>"; hörbar erst, wenn der Audiomanager die Quelle verbindet
+// (macht die App, car_route.js). Format steht im Namen: _CF_24_ = 24 kHz, MONO = 1 Kanal.
+// ---------------------------------------------------------------------------
+function smartxEndpoints() {
+  let names = [];
+  try { names = fs.readdirSync('/dev/shm'); } catch (e) { names = []; }
+  const out = [];
+  names.forEach(function (n) {
+    const m = /^smartx_(.+)_p_connection$/.exec(n);
+    if (m && out.indexOf(m[1]) < 0) out.push(m[1]);
+  });
+  return out.sort();
+}
+function isSmartx(d) { return /(^|:)smartx:/.test(d || ''); }
+/** "smartx:<Name>" -> "plug:smartx:<Kanal>" (exakter Kanal oder erster, der mit <Name>_ beginnt). */
+function resolveSmartx(d, list) {
+  if (!/^smartx:/.test(d || '')) return d;
+  const want = d.slice(7);
+  list = list || smartxEndpoints();
+  let hit = list.indexOf(want) >= 0 ? want : null;
+  if (!hit) {
+    const base = want.replace(/_CF_\d+.*$/, '');
+    hit = list.filter(function (n) { return n.indexOf(base + '_') === 0 || n === base; })[0] || null;
+  }
+  if (!hit) hit = /_CF_\d+/.test(want) ? want : want + '_CF_48_STEREO'; // unbekannt: so probieren
+  return 'plug:smartx:' + hit;
+}
+/** Ausgabeformat eines Geräts: SmartX-Kanäle nach Namen, sonst Synthese-Rate Stereo. */
+function formatOf(dev) {
+  const m = /smartx:.*_CF_(\d+)/.exec(dev || '');
+  const k = m ? Number(m[1]) : 0;
+  const rate = k === 24 ? 24000 : (k === 16 ? 16000 : RATE);
+  return { rate: rate, ch: /smartx:.*MONO/i.test(dev || '') ? 1 : 2 };
+}
+
 /**
  * Abspielwege in Reihenfolge. opts.device: ALSA-Gerät für den Python-Player ('auto' = AUTO_DEVICES).
  */
@@ -129,6 +169,14 @@ function candidates(opts) {
   }
   // ALSA über Python + ctypes (das Head Unit hat libasound und mgu-python, aber kein aplay)
   const py = findPython();
+  // SmartX-Kanal: nur genau dieser Weg, kein Rückfall auf andere Geräte (würde fremde Wiedergabe stören)
+  if (isSmartx(opts.device) && !process.env.ICONIX_PLAYER) {
+    if (!py || !fs.existsSync(ALSA_SCRIPT)) return out;
+    const f = formatOf(opts.device);
+    out.push({ name: 'alsa:' + opts.device, path: py, argv: [ALSA_SCRIPT, 'play', opts.device, String(f.rate), String(SMARTX_BUFFER_US), String(f.ch)],
+      device: opts.device, fmt: f, smartx: true });
+    return out;
+  }
   if (py && fs.existsSync(ALSA_SCRIPT) && (hasLibasound() || process.env.ICONIX_ALSA_FORCE)) {
     const dev = opts.device && opts.device !== 'auto' ? [opts.device] : AUTO_DEVICES;
     dev.forEach(function (d) {
@@ -178,8 +226,9 @@ function Output(onState, log, opts) {
   this.backend = null;
   this.blocked = false;
   this.underruns = 0;
-  this.error = this.list.length ? null : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose';
+  this.error = this.list.length ? null : (isSmartx(this.opts.device) ? 'Python/alsa_play.py fehlt für SmartX' : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose');
   this.lastErr = '';
+  this.fmt = { rate: RATE, ch: 2 };
 }
 
 Output.prototype.start = function () {
@@ -202,6 +251,7 @@ Output.prototype.start = function () {
   const startedAt = Date.now();
   this.child = child;
   this.backend = b.name;
+  this.fmt = b.fmt || { rate: RATE, ch: 2 };
   this.blocked = false;
   this.error = null;
   child.stderr.setEncoding('utf8');
@@ -244,6 +294,9 @@ Output.prototype.stop = function () {
   setTimeout(function () { try { c.kill('SIGTERM'); } catch (e) { /* egal */ } }, 300);
 };
 
+/** Frames (in Synthese-Rate), die zusammen ein Ausgabe-Frame ergeben (2 bei 24-kHz-Kanälen). */
+Output.prototype.step = function () { return Math.max(1, Math.round(RATE / (this.fmt.rate || RATE))); };
+
 Output.prototype.write = function (buf) {
   if (!this.child || this.blocked) return false;
   const ok = this.child.stdin.write(buf);
@@ -268,6 +321,27 @@ function toPcm(f32, frames) {
       const v = f32[i];
       buf.writeInt16LE(v >= 1 ? 32767 : (v <= -1 ? -32767 : (v * 32767) | 0), i * 2);
     }
+  }
+  return buf;
+}
+
+/**
+ * Float32 Stereo (Synthese-Rate) -> S16LE im Ausgabeformat: je step Frames werden gemittelt (einfacher
+ * Tiefpass + Dezimierung, reicht für Motorsound), ch 1 = Mono-Mix. frames sollte ein Vielfaches von step sein.
+ */
+function toPcmFmt(f32, frames, fmt) {
+  const step = Math.max(1, Math.round(RATE / (fmt.rate || RATE))), ch = fmt.ch === 1 ? 1 : 2;
+  if (step === 1 && ch === 2) return toPcm(f32, frames);
+  const m = Math.floor(frames / step);
+  const buf = Buffer.alloc(m * ch * 2);
+  const k = 1 / step;
+  const q = function (v) { return v >= 1 ? 32767 : (v <= -1 ? -32767 : (v * 32767) | 0); };
+  for (let j = 0; j < m; j++) {
+    let l = 0, r = 0;
+    for (let s = 0, i = j * step * 2; s < step; s++, i += 2) { l += f32[i]; r += f32[i + 1]; }
+    l *= k; r *= k;
+    if (ch === 1) buf.writeInt16LE(q((l + r) * 0.5), j * 2);
+    else { buf.writeInt16LE(q(l), j * 4); buf.writeInt16LE(q(r), j * 4 + 2); }
   }
   return buf;
 }
@@ -302,6 +376,7 @@ function Engine(opts) {
   this.scan = null;      // Ergebnis von scanAlsa
   this.devTest = null;   // laufender Gerätetest { list, i, until, prev }
   this.out = new Output(function () { self._changed(); }, this.log, { device: this._resolve(this.device) });
+  this.wantSound = false; this.lastRetry = 0;
   this.lastParams = 0;
   this.testUntil = 0; this.testStart = 0;
   this.silentSince = 0;
@@ -319,6 +394,7 @@ Engine.prototype.configure = function (cfg) {
 
 // 'scanN' = das N-te Gerät, das sich beim Scan öffnen ließ (so in der Diagnose nummeriert)
 Engine.prototype._resolve = function (d) {
+  if (/^smartx:/.test(d || '')) return resolveSmartx(d);
   const m = /^scan(\d+)$/.exec(d || '');
   if (!m) return d || 'auto';
   const ok = usable(this.scan);
@@ -403,7 +479,7 @@ Engine.prototype.test = function () {
   // nach einem Fehler beim Testsound alle Abspielprogramme erneut probieren
   this.out.bad = {};
   this.out.list = candidates({ device: this._resolve(this.device) });
-  this.out.error = this.out.list.length ? null : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose';
+  this.out.error = this.out.list.length ? null : (isSmartx(this.out.opts.device) ? 'Python/alsa_play.py fehlt für SmartX' : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose');
   this._changed();
 };
 
@@ -415,7 +491,8 @@ Engine.prototype.status = function () {
     rate: RATE, playing: !!out.child, error: out.error, profile: this.synth.cfg.profile,
     underruns: out.underruns || 0, late: this.late, leadMs: LEAD_MS,
     players: out.list.map(function (b) { return b.name; }),
-    device: this.device, python: findPython(),
+    device: this.device, resolved: out.opts.device, python: findPython(),
+    wants: !!this.wantSound, outRate: out.fmt.rate, outCh: out.fmt.ch,
     scan: this.scan ? (this.scan.devices || []).map(function (d) { return { name: d.name, ok: d.ok && !isSilent(d), silent: isSilent(d), error: d.error }; }) : null,
     scanError: this.scan && this.scan.error,
     devTest: this.devTest ? { device: this.devTest.list[this.devTest.i], i: this.devTest.i + 1, n: this.devTest.list.length } : null
@@ -454,9 +531,17 @@ Engine.prototype._tick = function () {
   if (testing && !synth.cfg.enabled) { synth.cfg.enabled = true; this._testUnmuted = true; }
   if (!testing && this._testUnmuted) { synth.cfg.enabled = false; this._testUnmuted = false; }
 
+  this.wantSound = wantSound;
   if (wantSound) this.silentSince = 0;
   else if (!this.silentSince) this.silentSince = now;
 
+  // SmartX-Kanal ließ sich nicht öffnen (z. B. noch nicht da): regelmäßig neu auflösen und erneut probieren
+  if (wantSound && !out.child && out.error && isSmartx(out.opts.device) && now - this.lastRetry > SMARTX_RETRY_MS) {
+    this.lastRetry = now;
+    if (this._resolve(this.device) !== out.opts.device) { this.setDevice(this.device); return; }
+    out.bad = {}; out.list = candidates(out.opts);
+    if (out.list.length) out.error = null;
+  }
   if (wantSound && !out.child && !out.error) {
     if (out.start()) { this.t0 = now; this.written = 0; }
   }
@@ -468,10 +553,12 @@ Engine.prototype._tick = function () {
 
   let due = Math.floor((now - this.t0 + LEAD_MS) / 1000 * RATE) - this.written;
   if (due > RATE / 2) { this.t0 = now; this.written = 0; due = Math.floor(LEAD_MS / 1000 * RATE); } // Resync nach Hänger
-  while (due > 0 && !out.blocked && out.child) {
-    const n = Math.min(due, MAX_CHUNK);
+  const step = out.step();
+  while (due >= step && !out.blocked && out.child) {
+    let n = Math.min(due, MAX_CHUNK);
+    n -= n % step;
     synth.render(this.f32, n);
-    out.write(toPcm(this.f32, n));
+    out.write(toPcmFmt(this.f32, n, out.fmt));
     this.written += n; due -= n;
   }
 };
@@ -682,6 +769,7 @@ function diagLines(r, extra) {
 module.exports = {
   probeAudio: probeAudio, diagLines: diagLines, scanAlsa: scanAlsa, findPython: findPython,
   probeSmartx: probeSmartx, smartxLines: smartxLines, usable: usable,
-  Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, sweepAt: sweepAt,
+  Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, toPcmFmt: toPcmFmt, sweepAt: sweepAt,
+  smartxEndpoints: smartxEndpoints, resolveSmartx: resolveSmartx, formatOf: formatOf, isSmartx: isSmartx,
   RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };

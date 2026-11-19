@@ -4,7 +4,8 @@ Iconix Sounds – ALSA-Wiedergabe ohne aplay: Python + ctypes direkt gegen libas
 
 Das Head Unit hat libasound und Python 3.12 (mgu-python), aber kein aplay. Dieses Skript ersetzt aplay:
 
-  alsa_play.py play <gerät> <rate>   liest S16LE-Stereo von stdin und spielt es auf <gerät> ab
+  alsa_play.py play <gerät> <rate> [puffer_us] [kanäle]
+                                     liest S16LE (Stereo oder Mono) von stdin und spielt es auf <gerät> ab
   alsa_play.py list [namen...]       gibt JSON aus: alle ALSA-PCM-Namen (+ zusätzliche) und ob sie sich öffnen lassen
   alsa_play.py tone <gerät> [sek]    spielt einen Testton (440 Hz) – zum Ausprobieren von Hand
 
@@ -15,6 +16,7 @@ import ctypes
 import ctypes.util
 import json
 import math
+import os
 import struct
 import sys
 
@@ -69,12 +71,43 @@ def err(lib, code):
         return str(code)
 
 
-def open_pcm(lib, dev, rate, latency_us, nonblock=False):
+def smartx_lock(dev):
+    """SmartX legt beim Öffnen /run/smartx/smartx_<Kanal>_p.lock an. Gehört sie root (dieser Dienst), kommen
+    BMWs eigene Prozesse (ent_alsa, Gruppe mgu_alsa) nicht mehr an den Kanal und z. B. CarPlay bleibt bis zum
+    Neustart stumm. Daher vorher selbst anlegen: Besitzer ent_alsa, Gruppe mgu_alsa, 0660."""
+    i = dev.find('smartx:')
+    if i < 0 or not os.path.isdir('/run/smartx'):
+        return
+    lock = '/run/smartx/smartx_%s_p.lock' % dev[i + 7:]
+    try:
+        import grp
+        import pwd
+        if not os.path.exists(lock):
+            os.close(os.open(lock, os.O_CREAT | os.O_WRONLY, 0o660))
+        uid, gid = -1, -1
+        try:
+            uid = pwd.getpwnam('ent_alsa').pw_uid
+        except KeyError:
+            pass
+        try:
+            gid = grp.getgrnam('mgu_alsa').gr_gid
+        except KeyError:
+            pass
+        st = os.stat(lock)
+        if (uid != -1 and st.st_uid != uid) or (gid != -1 and st.st_gid != gid):
+            os.chown(lock, uid, gid)
+        os.chmod(lock, 0o660)
+    except Exception as e:
+        sys.stderr.write('alsa_play: lock %s: %s\n' % (lock, e))
+        sys.stderr.flush()
+
+
+def open_pcm(lib, dev, rate, latency_us, nonblock=False, channels=2):
     h = ctypes.c_void_p()
     r = lib.snd_pcm_open(ctypes.byref(h), dev.encode(), SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK if nonblock else 0)
     if r < 0:
         return None, 'open: ' + err(lib, r)
-    r = lib.snd_pcm_set_params(h, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 2, int(rate), 1, int(latency_us))
+    r = lib.snd_pcm_set_params(h, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, int(channels), int(rate), 1, int(latency_us))
     if r < 0:
         lib.snd_pcm_close(h)
         return None, 'set_params: ' + err(lib, r)
@@ -129,16 +162,17 @@ def cmd_list(extra=None):
     print(json.dumps({'devices': res}))
 
 
-def cmd_play(dev, rate, latency_us=200000):
+def cmd_play(dev, rate, latency_us=200000, channels=2):
     lib = load_alsa()
-    h, e = open_pcm(lib, dev, rate, latency_us)
+    smartx_lock(dev)
+    h, e = open_pcm(lib, dev, rate, latency_us, channels=channels)
     if not h:
         sys.stderr.write('alsa_play: %s (%s)\n' % (e, dev))
         sys.stderr.flush()
         return 2
-    sys.stderr.write('alsa_play: spielt auf %s mit %d Hz\n' % (dev, rate))
+    sys.stderr.write('alsa_play: spielt auf %s mit %d Hz, %d Kanal/Kanäle\n' % (dev, rate, channels))
     sys.stderr.flush()
-    frame_bytes = 4
+    frame_bytes = 2 * channels
     chunk = 1024 * frame_bytes
     stdin = sys.stdin.buffer
     pending = b''
@@ -202,7 +236,7 @@ if __name__ == '__main__':
         if a and a[0] == 'list':
             cmd_list(a[1:])
         elif len(a) >= 3 and a[0] == 'play':
-            sys.exit(cmd_play(a[1], int(a[2]), int(a[3]) if len(a) > 3 else 200000))
+            sys.exit(cmd_play(a[1], int(a[2]), int(a[3]) if len(a) > 3 else 200000, int(a[4]) if len(a) > 4 else 2))
         elif len(a) >= 2 and a[0] == 'tone':
             sys.exit(cmd_tone(a[1], float(a[2]) if len(a) > 2 else 2.0))
         else:
