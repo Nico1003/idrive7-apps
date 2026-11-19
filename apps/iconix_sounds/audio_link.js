@@ -117,7 +117,8 @@ class AudioLink extends EventEmitter {
     if (this.local) this.local.configure(cfg);
   }
 
-  params(sample) { this.latest = sample; }
+  // sofort weitergeben (der Takt unten sendet nur noch Keepalives) – spart im Schnitt ~25 ms Verzögerung
+  params(sample) { this.latest = sample; this._tick(); }
 
   /** Testsound nacheinander auf allen ALSA-Geräten, die der Dienst öffnen kann (je 4 s). */
   testDevices() {
@@ -144,6 +145,11 @@ class AudioLink extends EventEmitter {
     const ds = this.daemonStatus;
     if (this.connected && ds) {
       head.push('Ausgabegerät: ' + (ds.device || 'auto') + ' · Python: ' + (ds.python || 'nicht gefunden'));
+      // Verzögerung und Aussetzer: Vorlauf passt sich an (Start 120 ms, bei ruhigem Lauf bis 70 ms)
+      head.push('Ton: Vorlauf ' + (ds.leadMs != null ? ds.leadMs + ' ms' : '?') +
+        (ds.bufMs ? ' · ALSA-Puffer ' + ds.bufMs + ' ms' : '') +
+        ' · Aussetzer ' + (ds.underruns || 0) + (ds.late ? ' · verspätete Takte ' + ds.late : '') +
+        (ds.ducked ? ' · abgesenkt' : ''));
       if (ds.scan) {
         let n = 0;
         head.push('ALSA-Geräte (Nummer = Einstellung "Gerät N"):');

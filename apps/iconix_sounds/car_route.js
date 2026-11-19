@@ -42,6 +42,11 @@ const ROUTES = {
   alsa:        { label: 'ALSA direkt', source: null, sink: null, mark: false, device: null }
 };
 const DEFAULT_ROUTE = 'overlay';
+// Absenken (Ducking): solange eine dieser Quellen verbunden ist, wird der Motorsound leiser.
+// Namen aus dem Audiomanager (getListMainSources); Musikquellen zählen nicht.
+const DUCK_RE = /phone|tel|call|hfp|handsfree|voice|speech|tts|prompt|navi|guidance|announce|traffic|pdc|park|chime|gong|warn|alert|signal|siri|assist|sds|ecall|bcall/i;
+const NO_DUCK_RE = /media|radio|tuner|usb|a2dp|music|audio_stream|carlife|overlay|iconix/i;
+const DUCK_POLL_MS = 1500;
 const CS = ['CS_UNKNOWN', 'CS_CONNECTING', 'CS_CONNECTED', 'CS_DISCONNECTING', 'CS_DISCONNECTED', 'CS_SUSPENDED'];
 
 function bootId() {
@@ -86,6 +91,10 @@ class CarRoute {
     this.nextTry = 0; this.lastVerify = 0;
     this.timer = null;
     this.cleanupDone = false;
+    this.duckOn = true;         // Einstellung "Bei Telefon/Ansagen leiser"
+    this.ducked = false; this.duckBy = null;
+    this.duckBusy = false; this.lastDuck = 0;
+    this.srcNames = {}; this.srcAt = 0;
   }
 
   static routes() { return ROUTES; }
@@ -104,6 +113,36 @@ class CarRoute {
     if (!!on !== this.wanted) { this.wanted = !!on; this.nextTry = 0; }
   }
 
+  /** Absenken an/aus (Einstellung). */
+  setDuck(on) { this.duckOn = !!on; if (!on) { this.ducked = false; this.duckBy = null; } }
+
+  /** Ist eine Quelle, bei der abgesenkt wird (nur nach Namen; eigene Quelle und Musik zählen nicht)? */
+  static duckName(name) { return !!name && DUCK_RE.test(name) && !NO_DUCK_RE.test(name); }
+
+  /** Andere aktive Verbindungen prüfen: Telefon, Navi-Ansage, Parkpiepser ... -> ducked. */
+  async _pollDuck() {
+    if (this.duckBusy) return;
+    this.duckBusy = true; this.lastDuck = Date.now();
+    try {
+      if (!(await this._proxies())) return;
+      const list = await this._connections();
+      const own = this.conn ? this.conn.source : null;
+      const active = list.filter((c) => c.source !== own && (!c.state || c.state === 'CS_CONNECTED' || c.state === 'CS_CONNECTING'));
+      // Namen der Quellen nachladen, wenn eine unbekannt ist (höchstens alle 30 s)
+      if (active.some((c) => !(c.source in this.srcNames)) && Date.now() - this.srcAt > 30000) {
+        this.srcAt = Date.now();
+        try {
+          const src = listOf(await this._call(this.am, 'getListMainSources', {}, 3000), ['listMainSources']);
+          src.forEach((x) => { this.srcNames[x.sourceID] = String(x.name || ''); });
+        } catch (e) { /* nächstes Mal */ }
+      }
+      const hit = active.filter((c) => CarRoute.duckName(this.srcNames[c.source]))[0];
+      const by = hit ? this.srcNames[hit.source] + ' (' + hit.source + ')' : null;
+      if (!!hit !== this.ducked) this.log.info('iconix: ' + (hit ? 'leiser wegen ' + by : 'wieder normal laut'));
+      this.ducked = !!hit; this.duckBy = by;
+    } catch (e) { /* Liste nicht lesbar: Zustand lassen */ } finally { this.duckBusy = false; }
+  }
+
   needsAm() { const r = ROUTES[this.routeId]; return !!(r && r.source != null); }
 
   /** Kurzer Text für die Statuszeile. */
@@ -113,6 +152,7 @@ class CarRoute {
     let s = r.label + ': ' + this.state;
     if (this.state === 'verbunden' && this.connState && this.connState !== 'CS_CONNECTED') s += ' (' + this.connState + ')';
     if (this.lastError && this.state !== 'verbunden') s += ' – ' + this.lastError;
+    if (this.ducked) s += ' · leiser (Telefon/Ansage)';
     return s;
   }
 
@@ -170,8 +210,10 @@ class CarRoute {
   }
 
   async _step() {
-    if (this.busy) return;
     const now = Date.now();
+    if (this.duckOn && this.wanted && now - this.lastDuck >= DUCK_POLL_MS) this._pollDuck();
+    else if (!this.wanted && this.ducked) { this.ducked = false; this.duckBy = null; }
+    if (this.busy) return;
     const target = this.wanted && this.needsAm() ? this.routeId : null;
     const r = target ? ROUTES[target] : null;
     // nichts zu tun?
@@ -275,6 +317,7 @@ class CarRoute {
     const out = ['--- Tonweg (Audiomanager) ---', 'Weg: ' + r.label + (r.source != null ? ' · Quelle ' + r.source + ' -> Senke ' + r.sink : '') +
       (r.device ? ' · Kanal ' + r.device.replace(/^smartx:/, '') : '')];
     out.push('Status: ' + this.short() + (this.conn ? ' · ID ' + this.conn.id : ''));
+    out.push('Absenken: ' + (!this.duckOn ? 'aus' : this.ducked ? 'aktiv wegen ' + this.duckBy : 'bereit (Telefon, Navi, PDC ...)'));
     if (!(await this._proxies())) { out.push(this.proxyErr); return out; }
     const fmt = (a, idKey) => a.map(function (x) { return x[idKey] + ' ' + (x.name || ''); }).join(', ');
     try {
@@ -296,3 +339,4 @@ class CarRoute {
 module.exports = CarRoute;
 module.exports.ROUTES = ROUTES;
 module.exports.DEFAULT_ROUTE = DEFAULT_ROUTE;
+module.exports.DUCK_POLL_MS = DUCK_POLL_MS;

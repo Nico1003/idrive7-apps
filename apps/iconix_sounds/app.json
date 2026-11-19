@@ -2,14 +2,14 @@
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
   "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), Tonweg zum Testen wählbar. Braucht das Tool Iconix Audio.",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
   "mguHmi": ["ID7", "ID8"],
   "autostart": true,
   "requires": {
-    "iconix-audiod": "0.9.4"
+    "iconix-audiod": "0.9.5"
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -146,6 +146,59 @@
       "default": false
     },
     {
+      "key": "duck",
+      "label": "Bei Telefon/Ansagen leiser",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "maxTorque",
+      "label": "Max. Drehmoment",
+      "type": "choice",
+      "default": 400,
+      "options": [
+        [250, "250 Nm"],
+        [300, "300 Nm"],
+        [350, "350 Nm"],
+        [400, "400 Nm (220d)"],
+        [450, "450 Nm"],
+        [500, "500 Nm"],
+        [700, "700 Nm"]
+      ],
+      "group": "Motor anpassen"
+    },
+    {
+      "key": "carIdle",
+      "label": "Leerlaufdrehzahl",
+      "type": "choice",
+      "default": 800,
+      "options": [
+        [650, "650"],
+        [700, "700"],
+        [750, "750"],
+        [800, "800"],
+        [850, "850"],
+        [900, "900"]
+      ],
+      "group": "Motor anpassen"
+    },
+    {
+      "key": "carRedline",
+      "label": "Abregeldrehzahl",
+      "type": "choice",
+      "default": 4800,
+      "options": [
+        [4200, "4200"],
+        [4500, "4500"],
+        [4800, "4800 (Diesel)"],
+        [5200, "5200"],
+        [6000, "6000"],
+        [6500, "6500"],
+        [7000, "7000"]
+      ],
+      "group": "Motor anpassen"
+    },
+    {
       "key": "route",
       "label": "Tonweg (zum Testen)",
       "type": "choice",
@@ -158,7 +211,8 @@
         ["carlifeMain", "5 CarLife auf MainSink"],
         ["carplay", "6 CarPlay-Kanal (ohne Audiomanager)"],
         ["alsa", "7 ALSA direkt (Ausgabegeraet unten)"]
-      ]
+      ],
+      "group": "Experten"
     },
     {
       "key": "alsaDevice",
@@ -176,7 +230,9 @@
         ["scan4", "Geraet 4 (Diagnose)"],
         ["scan5", "Geraet 5 (Diagnose)"],
         ["scan6", "Geraet 6 (Diagnose)"]
-      ]
+      ],
+      "group": "Experten",
+      "when": {"route": "alsa"}
     },
     {
       "key": "loadSource",
@@ -188,51 +244,8 @@
         ["torque", "Motormoment"],
         ["pedal", "Gaspedal"],
         ["rpm", "Drehzahlanstieg"]
-      ]
-    },
-    {
-      "key": "maxTorque",
-      "label": "Max. Drehmoment",
-      "type": "choice",
-      "default": 400,
-      "options": [
-        [250, "250 Nm"],
-        [300, "300 Nm"],
-        [350, "350 Nm"],
-        [400, "400 Nm (220d)"],
-        [450, "450 Nm"],
-        [500, "500 Nm"],
-        [700, "700 Nm"]
-      ]
-    },
-    {
-      "key": "carIdle",
-      "label": "Leerlaufdrehzahl",
-      "type": "choice",
-      "default": 800,
-      "options": [
-        [650, "650"],
-        [700, "700"],
-        [750, "750"],
-        [800, "800"],
-        [850, "850"],
-        [900, "900"]
-      ]
-    },
-    {
-      "key": "carRedline",
-      "label": "Abregeldrehzahl",
-      "type": "choice",
-      "default": 4800,
-      "options": [
-        [4200, "4200"],
-        [4500, "4500"],
-        [4800, "4800 (Diesel)"],
-        [5200, "5200"],
-        [6000, "6000"],
-        [6500, "6500"],
-        [7000, "7000"]
-      ]
+      ],
+      "group": "Experten"
     }
   ]
 }

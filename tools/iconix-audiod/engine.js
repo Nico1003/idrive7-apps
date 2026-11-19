@@ -289,6 +289,8 @@ Output.prototype.start = function () {
       if (self.underruns <= 5 || self.underruns % 50 === 0) log(b.name + ': ' + line + ' (#' + self.underruns + ')');
       return;
     }
+    const mb = /Puffer (\d+) ms/.exec(line);
+    if (mb) { self.bufMs = Number(mb[1]); log(b.name + ': ' + line); return; }
     self.lastErr = line.slice(0, 120); log(b.name + ': ' + line);
   });
   child.stdin.on('error', function () { /* EPIPE -> exit folgt */ });
@@ -536,7 +538,7 @@ Engine.prototype.status = function () {
     ok: !out.error,
     backend: out.backend || (out.list[0] && !out.error ? out.list[0].name : null),
     rate: RATE, playing: !!out.child, error: out.error, profile: this.synth.cfg.profile,
-    underruns: out.underruns || 0, late: this.late, leadMs: out.played != null && out.child ? (this.fbLead || FB_LEAD_MS) : LEAD_MS,
+    underruns: out.underruns || 0, late: this.late, bufMs: out.child ? out.bufMs || null : null, ducked: !!this.synth.cfg.duck, leadMs: out.played != null && out.child ? (this.fbLead || FB_LEAD_MS) : LEAD_MS,
     players: out.list.map(function (b) { return b.name; }),
     device: this.device, resolved: out.opts.device, python: findPython(),
     wants: !!this.wantSound, outRate: out.fmt.rate, outCh: out.fmt.ch,

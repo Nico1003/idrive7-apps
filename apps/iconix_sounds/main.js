@@ -22,11 +22,11 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.4';
+const VERSION = '0.9.5';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 80, intensity: 70, sport: false,
-  muteParked: false, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, duck: true, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -70,19 +70,21 @@ function startCore(host) {
       carIdle: feedCfg.carIdle,
       carRedline: num(g('carRedline'), 4800),
       route: CarRoute.ROUTES[String(g('route'))] ? String(g('route')) : CarRoute.DEFAULT_ROUTE,
-      device: 'auto'
+      device: 'auto',
+      duck: false
     };
     // Gerät für den Dienst: SmartX-Kanal des Tonwegs, bei "ALSA direkt" das frühere Ausgabegerät
     const rt = CarRoute.route(synthCfgCache.route);
     synthCfgCache.device = rt.device || String(g('alsaDevice') || 'auto');
-    uiCfg = { muteParked: bool(g('muteParked')) };
+    uiCfg = { muteParked: bool(g('muteParked')), duck: bool(g('duck')) };
   };
   refresh();
 
   const link = new AudioLink(log, VERSION);
   const feed = new VehicleFeed(host.signals, log, () => feedCfg);
   const synthCfg = () => synthCfgCache;
-  const pushCfg = () => { refresh(); link.configure(synthCfgCache); };
+  let ducked = false;
+  const pushCfg = () => { refresh(); synthCfgCache.duck = ducked; link.configure(synthCfgCache); if (core) core.route.setDuck(uiCfg.duck); };
 
   feed.on('sample', s => {
     last = s;
@@ -103,7 +105,10 @@ function startCore(host) {
     const now = Date.now();
     if (ds && (ds.wants || ds.playing)) lastSound = now;
     route.want(synthCfgCache.route, lastSound > 0 && now - lastSound < ROUTE_GRACE_MS);
+    // Telefon, Navi-Ansage, Parkpiepser: Motorsound absenken (CarRoute beobachtet den Audiomanager)
+    if (route.ducked !== ducked) { ducked = route.ducked; synthCfgCache.duck = ducked; link.configure(synthCfgCache); }
   }, 500);
+  route.setDuck(uiCfg.duck);
   route.start();
   log.info('iconix: Kern gestartet, Version ' + VERSION + ', Tonweg ' + synthCfgCache.route);
 

@@ -61,10 +61,14 @@ Konstantfahrt, Teillast):
 
 - Profil und Lautstärke per Antippen wählen; der iDrive-Knopf und die Lautstärkeregelung des Autos bleiben unangetastet
 - Lautstärke bis 150 % (über 100 % „Boost“: leise Passagen lauter, Spitzen begrenzt), **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
-- Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound bildet das
-  echte Drehzahlband auf das Profil ab
+- **Bei Telefon/Ansagen leiser:** Telefonate, Navi-Ansagen und Parkpiepser senken den Motorsound um etwa 12 dB ab
+- **Motor anpassen:** Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound
+  bildet das echte Drehzahlband auf das Profil ab
+- **Experten:** Tonweg, Ausgabegerät und Lastquelle (zum Ausprobieren in anderen Autos)
 - **Testsound:** 9 Sekunden Leerlauf → Vollgas → Schub, auch im Stand
-- **Audio-Diagnose** direkt in der App: Verbindung zum Audiomanager, Quellen, Senken, SmartX-Kanäle
+- **Audio-Diagnose** direkt in der App: Verbindung zum Audiomanager, Quellen, Senken, SmartX-Kanäle, Vorlauf und
+  Aussetzer, Grund fürs Absenken
+- **QR log** in den Einstellungen: das Log als QR-Codes zum Abfotografieren (für ein Issue ohne SSH)
 
 ### So kommt der Ton in die Lautsprecher
 
@@ -73,7 +77,7 @@ Dienst auf dem Head Unit) den Sound und schreibt ihn in einen Audiokanal des BMW
 App bittet den BMW-Audiomanager, diesen Kanal mit den Lautsprechern zu verbinden – nur solange Ton
 gebraucht wird.
 
-Der **Tonweg** ist in den Einstellungen wählbar. Standard ist der **Overlay-Mix**: Der Motorsound
+Der **Tonweg** ist in den Einstellungen unter „Experten“ wählbar. Standard ist der **Overlay-Mix**: Der Motorsound
 liegt über der Musik, die weiterläuft. Weitere Wege (CarLife exklusiv, CarLife-Navi, MainSink,
 CarPlay-Kanal, ALSA direkt) sind zum Ausprobieren in anderen Autos und Ausstattungen gedacht.
 
@@ -94,8 +98,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Iconix Sounds (App) | 0.9.4 |
-| Iconix Audio (Tool) | 0.9.4 |
+| Iconix Sounds (App) | 0.9.5 |
+| Iconix Audio (Tool) | 0.9.5 |
 
 ---
 
@@ -159,9 +163,16 @@ node kit/tools/iconix_popscan.js
 node kit/tools/test_drive_coach.js
 ```
 
+```bash
+python3 kit/tools/test_alsa_play.py
+```
+
+Dieselben Prüfungen laufen bei jedem Push als GitHub-Action (`.github/workflows/app-tests.yml`).
+
 `test_iconix_route.js` prüft Tonweg, Umrechnung und Klang (keine Höhen, keine Knackser, kaum
 Rauschen); `iconix_calibrate.js` misst Pegel und Klangbild je Profil und schreibt Hörproben;
-`iconix_popscan.js` sucht in einer Fahrt mit Schaltvorgängen nach Knacksern.
+`iconix_popscan.js` sucht in einer Fahrt mit Schaltvorgängen nach Knacksern; `test_alsa_play.py` prüft den
+Python-Player mit einer simulierten Soundkarte.
 
 Der Klang folgt dem physikalisch informierten Ansatz von Baldan et al. (2015, „Physically informed car
 engine sound synthesis“) und den offenen Projekten

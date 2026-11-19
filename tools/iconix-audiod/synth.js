@@ -45,6 +45,7 @@
   var HEADROOM = 0.85;
   // Kompressor (wie bei Active Sound Design): leise Passagen (Gleiten, Schub, Leerlauf) bis +6 dB lauter,
   // Vollgas bleibt gleich. Pegel bezogen auf Lautstärke 100 %; Verhältnis 3:1 oberhalb COMP_T (leise bis ~+10 dB).
+  var DUCK_GAIN = 0.25;      // abgesenkt (Telefon, Ansage): ~-12 dB
   var COMP_T = 0.15, COMP_EXP = 0.667, COMP_MAKEUP = 3.0;
 
   function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
@@ -142,7 +143,7 @@
     this.sr = sampleRate || 48000;
     this.cfg = {
       enabled: true, profile: Profiles.DEFAULT,
-      volume: 0.6, intensity: 0.7, sport: false,
+      volume: 0.6, intensity: 0.7, sport: false, duck: false,
       carIdle: 800, carRedline: 4800
     };
     this.target = { rpm: 800, load: 0, speed: 0, overrun: false };
@@ -278,7 +279,7 @@
     var vk = (p.gain || 1) * (c.sport ? 1.3 : 1);
     // über 100 % (Boost): der Überschuss geht VOR den Kompressor -> leise Stellen lauter, Spitzen begrenzt
     var vc = Math.pow(c.volume, 1.5), boost = vc > 1 ? vc : 1;
-    var tgtVol = (vc > 1 ? 1 : vc) * vk * boost;
+    var tgtVol = (vc > 1 ? 1 : vc) * vk * boost * (c.duck ? DUCK_GAIN : 1);
     // Hüllkurve des Pegels (Spitze je Block, ~300 ms Abklingen) -> Kompressionsfaktor
     var lev = this.prePk * vk * HEADROOM * boost; this.prePk = 0;
     this.cEnv = lev > this.cEnv ? lev : this.cEnv * this.kRel;

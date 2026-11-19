@@ -27,7 +27,7 @@ function fakeAm(opts) {
     call: async (p, method, params) => {
       am.calls.push(method + ' ' + JSON.stringify(params));
       if (method === 'getListMainConnections') return { listConnections: am.conns.map((c) => Object.assign({}, c)) };
-      if (method === 'getListMainSources') return { listMainSources: [{ sourceID: 287, name: 'CarLifeMedia' }, { sourceID: 1048, name: 'OAPGenericOverlay' }] };
+      if (method === 'getListMainSources') return { listMainSources: opts.sources || [{ sourceID: 287, name: 'CarLifeMedia' }, { sourceID: 1048, name: 'OAPGenericOverlay' }] };
       if (method === 'getListMainSinks') return { listMainSinks: [{ sinkID: 1024, name: 'MediaSink_Front' }] };
       if (method === 'hookSourceAvailablityStatusChange') { am.avail[params.sourceID] = params.availability.availability; return {}; }
       if (method === 'connect') {
@@ -370,6 +370,47 @@ test('Player: Stille-Schutz gegen Leerlaufen und Stille zu Beginn (alsa_play.py)
   const py = fs.readFileSync(path.join(ROOT, 'tools/iconix-audiod/alsa_play.py'), 'utf8');
   assert.ok(/select\.select\(\[fd\]/.test(py) && /snd_pcm_writei\(h, zeros, fill_n\)/.test(py));
   assert.ok(/os\.write\(1, \('P %d/.test(py), 'Rückmeldung der gespielten Frames');
+});
+
+test('Absenken: verbundene Telefon-/Navi-Quelle senkt ab, Musik nicht, wieder laut wenn weg', async () => {
+  const sources = [{ sourceID: 1048, name: 'OAPGenericOverlay' }, { sourceID: 10, name: 'Tuner_FM' }, { sourceID: 40, name: 'TEL_HandsFree' },
+    { sourceID: 41, name: 'Navigation_Prompt' }, { sourceID: 12, name: 'USB_Media' }];
+  const { am, signals } = fakeAm({ sources, conns: [{ mainConnectionID: 3, sourceID: 10, sinkID: 1024, connectionState: 2 }] });
+  const r = new CarRoute(signals, quiet, null);
+  r.want('overlay', true);
+  await r._step(); await r._pollDuck();
+  assert.strictEqual(r.ducked, false, 'Radio allein: nicht absenken');
+  am.conns.push({ mainConnectionID: 4, sourceID: 40, sinkID: 1, connectionState: 2 });
+  await r._pollDuck();
+  assert.strictEqual(r.ducked, true);
+  assert.ok(/TEL_HandsFree/.test(r.duckBy));
+  am.conns = am.conns.filter((c) => c.sourceID !== 40);
+  am.conns.push({ mainConnectionID: 5, sourceID: 41, sinkID: 1, connectionState: 4 }); // getrennt: zählt nicht
+  await r._pollDuck();
+  assert.strictEqual(r.ducked, false);
+  r.setDuck(false); am.conns.push({ mainConnectionID: 6, sourceID: 40, sinkID: 1, connectionState: 2 });
+  r.lastDuck = 0; await r._step();
+  assert.strictEqual(r.ducked, false, 'Einstellung aus: nie absenken');
+  assert.ok(CarRoute.duckName('Phone') && CarRoute.duckName('PDC_Warning') && !CarRoute.duckName('CarLifeMedia') && !CarRoute.duckName('Radio_DAB'));
+});
+
+test('Absenken im Klang: rund -12 dB', () => {
+  const run = (duck) => { const s = new Synth(24000); s.configure({ profile: 'six', volume: 0.8, enabled: true, duck }); s._setProfile('six');
+    const f = new Float32Array(4800); let sum = 0, n = 0;
+    for (let k = 0; k < 50; k++) { s.setParams({ rpm: 2500, load: 0.4, speed: 80 }); s.render(f, 2400); if (k > 25) for (let i = 0; i < 4800; i += 2) { sum += f[i] * f[i]; n++; } }
+    return Math.sqrt(sum / n); };
+  const db = 20 * Math.log10(run(true) / run(false));
+  assert.ok(db < -9 && db > -15, 'abgesenkt um ' + db.toFixed(1) + ' dB');
+});
+
+test('Einstellungen: Telefon/Ansagen-Option, Experten- und Motor-Gruppe, Gerät nur bei Tonweg 7', () => {
+  const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/app.json'), 'utf8'));
+  const by = Object.fromEntries(j.settings.map((x) => [x.key, x]));
+  assert.strictEqual(by.duck.default, true);
+  assert.strictEqual(by.route.group, 'Experten');
+  assert.deepStrictEqual(by.alsaDevice.when, { route: 'alsa' });
+  assert.strictEqual(by.carRedline.group, 'Motor anpassen');
+  assert.ok(!by.dialVolume);
 });
 
 (async () => {
