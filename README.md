@@ -94,8 +94,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Iconix Sounds (App) | 0.9.1 |
-| Iconix Audio (Tool) | 0.9.1 |
+| Iconix Sounds (App) | 0.9.2 |
+| Iconix Audio (Tool) | 0.9.2 |
 
 ---
 
@@ -105,7 +105,7 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
   <img src="docs/screens/drive_coach.png" alt="Fahrstil-Coach: Live-Seite mit Wertungsring, Wasserglas, Tipp und Kategorien" width="100%">
 </p>
 
-Die zweite App in diesem Repository (Version 1.0.1) bewertet jede Fahrt live und im Rückblick, ähnlich
+Die zweite App in diesem Repository (Version 1.0.2) bewertet jede Fahrt live und im Rückblick, ähnlich
 einem Fahrlehrer auf dem Beifahrersitz:
 
 - **Wertung von 0 bis 100** aus sieben Kategorien: Vorausschau, Beschleunigen, Kurven, Ruhe,

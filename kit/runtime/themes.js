@@ -8,6 +8,16 @@
  * from the theme colour to red at the dial's limit (redline, max boost, ...).
  */
 const THEMES = {
+    bmw: {
+        name: 'BMW Blue',
+        // iDrive 7: dunkler, leicht blauer Grund, feine Kanten, BMW-Blau als Akzent
+        bg: '#06090e', panelTop: '#111925', panelBottom: '#0a0f17', panelEdge: '#233041',
+        tab: '#e6eaf0', track: '#1b2430', tick: '#4d5a6b', text: '#f2f5f8', dim: '#8d99aa',
+        accent: '#5fa3ff', accent2: '#8cc0ff', ok: '#5fa3ff', warn: '#ffb020', crit: '#e8332f', cold: '#7fd1ff',
+        glow: '#1c69d455', stripes: ['#1c69d4'], oil: '#e8332f', bar: '#1c69d4', hang: '#5fa3ff', sel: '#1c69d4', selText: '#ffffff', marker: '#ffffff',
+        ramp: ['#16447e', '#1c69d4', '#8cc0ff'],
+        hotRamp: ['#16447e', '#1c69d4', '#3d8bff', '#c04cdc', '#e8332f'],
+    },
     m_red: {
         name: 'M Red',
         bg: '#050506', panelTop: '#17181c', panelBottom: '#0d0d10', panelEdge: '#2a2b31',

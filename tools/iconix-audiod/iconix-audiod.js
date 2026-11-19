@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.9.1';
+const VERSION = '0.9.2';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
@@ -74,10 +74,15 @@ function runDaemon() {
     lastLine = line; lastSent = now;
     clients.forEach(function (c) { try { c.write(line); } catch (e) { /* egal */ } });
   }
+  // Statusdatei: nur bei Änderung schreiben, sonst alle 5 s als Lebenszeichen (die App wertet < 10 s als "läuft")
+  let lastFile = '', lastFileAt = 0;
   function writeStatusFile() {
     try {
+      const st = status(), cmp = JSON.stringify(Object.assign({}, st, { at: 0 })), now = Date.now();
+      if (cmp === lastFile && now - lastFileAt < 5000) return;
+      lastFile = cmp; lastFileAt = now;
       const tmp = STATUS_FILE + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(status()));
+      fs.writeFileSync(tmp, JSON.stringify(st));
       try { fs.chmodSync(tmp, 420 /* 0644 */); } catch (e) { /* egal */ }
       fs.renameSync(tmp, STATUS_FILE);
     } catch (e) { /* /tmp nicht beschreibbar: egal */ }

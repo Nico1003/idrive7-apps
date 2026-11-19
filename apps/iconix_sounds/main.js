@@ -22,7 +22,7 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.1';
+const VERSION = '0.9.2';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, sport: false,
@@ -135,7 +135,8 @@ function kitGfx(c) {
   return {
     rect: (x, y, w, h, col) => c.fillRect(x, y, w, h, col),
     rrect: (x, y, w, h, r, col) => c.roundRect(x, y, w, h, r, col),
-    text: (s, x, y, size, col, align, bold) => c.text(kitText(s), x, y, size, col, { align: align || 'left', font: bold ? 'bold' : 'label', literal: true }),
+    text: (s, x, y, size, col, align, weight) => c.text(kitText(s), x, y, size, col, { align: align || 'left', font: weight === 'light' ? 'light' : (weight ? 'bold' : 'label'), literal: true }),
+    line: (xa, ya, xb, yb, w, col) => c.line(xa, ya, xb, yb, w, col),
     arc: (cx, cy, r, th, a0, a1, col) => {
       // ui.js: Radiant ab 3 Uhr -> Kit: Grad ab 12 Uhr; über 360° hinaus in zwei Stücke teilen
       let d0 = a0 * RAD2DEG + 90, d1 = a1 * RAD2DEG + 90;
@@ -284,20 +285,29 @@ mgu.run({
     // Das Zustandsobjekt wird wiederverwendet (keine Allokation pro Frame).
     const HINT_DIAL = 'Drehen: Lautstärke · Drücken: Sound wechseln';
     const HINT_TOUCH = 'Antippen oder iDrive: Sound und Lautstärke wählen';
+    // Nur neu zeichnen, wenn sich etwas Sichtbares ändert: höchstens 30 Bilder/s beim Fahren, sonst 1/s.
+    // Der GPU-Renderer ruft die Schleife bis zu 60x/s auf – ohne diese Bremse würde jedes Mal gezeichnet.
     const st = { profiles: Profiles.list };
+    let lastKey = '', lastDraw = 0;
     ctx.loop('MAIN', 20, () => {
+      const s = c.last();
+      const cfg = c.synthCfg();
+      const a = audioStatus(c), now = Date.now();
+      const key = cfg.profile + '|' + cfg.enabled + '|' + cfg.volume + '|' + cfg.sport + '|' + cfg.carRedline + '|' +
+        (s ? Math.round(s.rpm / 10) + '|' + Math.round(s.speed) + '|' + Math.round(s.load * 40) : '-') + '|' + a.text + '|' + a.ok + '|' +
+        (diag ? diag.page + ':' + diag.lines.length : '');
+      if (now - lastDraw < 33 || (key === lastKey && now - lastDraw < 1000)) return undefined;
+      lastKey = key; lastDraw = now;
       const cv = ctx.canvas(UI.W, UI.H);
       const g = kitGfx(cv);
       visible = true;
-      if (!!cv.own !== own) { own = !!cv.own; log.info('iconix: Kit führt den Bildschirm: ' + own); }
+      if (!!cv.own !== own) { own = !!cv.own; log.info('iconix: Kit führt den Bildschirm: ' + own); lastKey = ''; }
       updateGrab();
-      const s = c.last();
-      const cfg = c.synthCfg();
       st.profile = cfg.profile;
       st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0; st.load = s ? s.load : 0;
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
       st.sport = cfg.sport; st.demo = !s;
-      st.audio = audioStatus(c);
+      st.audio = a;
       st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
       st.diag = diag;
       UI.draw(g, st);

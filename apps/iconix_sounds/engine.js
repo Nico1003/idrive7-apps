@@ -19,7 +19,8 @@ const Synth = require('./synth');
 
 // Synthese-Rate: 48 kHz wie die SmartX-Kanäle des Head Units (24-kHz-Kanäle bekommen je 2 Frames gemittelt)
 const RATE = Number(process.env.ICONIX_RATE) || 48000;
-const TICK_MS = 20;          // 50 Wakeups/s (Blöcke à 960 Samples) – schont die CPU
+const TICK_MS = 20;          // 50 Wakeups/s, solange Ton läuft (Blöcke à 960 Samples)
+const IDLE_TICK_MS = 200;    // ohne Ton nur 5 Wakeups/s; neue Fahrzeugdaten oder Testsound wecken sofort
 // so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter des Head Units sein). 160 ms gibt Reserve,
 // wenn Node auf dem Head Unit kurz hängt (GC, andere Apps) – sonst knackt/stottert es (Underrun).
 const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
@@ -495,7 +496,7 @@ Engine.prototype._nextTestDevice = function () {
   t.until = this.testUntil;
   this._changed();
 };
-Engine.prototype.params = function (p) { this.synth.setParams(p); this.lastParams = Date.now(); };
+Engine.prototype.params = function (p) { this.synth.setParams(p); this.lastParams = Date.now(); this.wake(); };
 Engine.prototype.test = function () {
   this.testStart = Date.now(); this.testUntil = this.testStart + 9000;
   // nach einem Fehler beim Testsound alle Abspielprogramme erneut probieren
@@ -503,6 +504,7 @@ Engine.prototype.test = function () {
   this.out.list = candidates({ device: this._resolve(this.device) });
   this.out.error = this.out.list.length ? null : (isSmartx(this.out.opts.device) ? 'Python/alsa_play.py fehlt für SmartX' : 'kein Abspielprogramm gefunden – siehe Audio-Diagnose');
   this._changed();
+  this.wake();
 };
 
 Engine.prototype.status = function () {
@@ -524,14 +526,33 @@ Engine.prototype.status = function () {
 Engine.prototype._changed = function () { try { this.onStatus(this.status()); } catch (e) { /* egal */ } };
 
 Engine.prototype.start = function () {
-  if (this.timer) return;
-  const self = this;
+  if (this.timer || this.running) return;
+  this.running = true;
   this.lastTick = Date.now();
-  this.timer = setInterval(function () { self._tick(); }, TICK_MS);
+  this._loop();
+};
+
+// Taktgeber: 20 ms, solange Ton läuft oder gewünscht ist, sonst 200 ms (spart im Stand/ohne Daten fast alles)
+Engine.prototype._busy = function () {
+  return !!(this.out.child || this.wantSound || this.devTest || Date.now() < this.testUntil);
+};
+Engine.prototype._loop = function () {
+  const self = this;
+  this.timer = null;
+  if (!this.running) return;
+  this._tick();
+  this.timer = setTimeout(function () { self._loop(); }, this._busy() ? TICK_MS : IDLE_TICK_MS);
+};
+/** Sofort einen Takt auslösen, wenn der Taktgeber gerade im langsamen Modus ist. */
+Engine.prototype.wake = function () {
+  if (!this.running || this._busy()) return;
+  if (this.timer) clearTimeout(this.timer);
+  this._loop();
 };
 
 Engine.prototype.stop = function () {
-  if (this.timer) { clearInterval(this.timer); this.timer = null; }
+  this.running = false;
+  if (this.timer) { clearTimeout(this.timer); this.timer = null; }
   this.out.stop();
 };
 
