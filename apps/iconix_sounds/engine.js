@@ -252,6 +252,7 @@ Output.prototype.start = function () {
   this.child = child;
   this.backend = b.name;
   this.fmt = b.fmt || { rate: RATE, ch: 2 };
+  this.dec = new Decimator(Math.round(RATE / (this.fmt.rate || RATE)));
   this.blocked = false;
   this.error = null;
   child.stderr.setEncoding('utf8');
@@ -326,24 +327,45 @@ function toPcm(f32, frames) {
 }
 
 /**
- * Float32 Stereo (Synthese-Rate) -> S16LE im Ausgabeformat: je step Frames werden gemittelt (einfacher
- * Tiefpass + Dezimierung, reicht für Motorsound), ch 1 = Mono-Mix. frames sollte ein Vielfaches von step sein.
+ * Dezimierer für Kanäle mit niedrigerer Rate (z. B. 48 -> 24 kHz): Tiefpass 4. Ordnung (Butterworth) bei
+ * 42 % der Zielrate, dann jedes step-te Sample. Ohne diesen Filter fallen Anteile oberhalb der halben
+ * Zielrate als falsche, hohe Töne zurück (Aliasing). Zustand bleibt über Blöcke erhalten (je Kanal).
  */
-function toPcmFmt(f32, frames, fmt) {
+function Decimator(step) {
+  this.step = Math.max(1, step | 0);
+  this.ph = 0;
+  const fc = RATE / this.step * 0.42;
+  this.f = [0, 1].map(function () { return [new Synth.Biquad().set('lp', fc, 0.5412, RATE), new Synth.Biquad().set('lp', fc, 1.3066, RATE)]; });
+}
+
+/**
+ * Float32 Stereo (Synthese-Rate) -> S16LE im Ausgabeformat (Rate, 1 oder 2 Kanäle). dec: Decimator mit
+ * Zustand (sonst ein neuer, dann ohne Übergang zwischen Blöcken).
+ */
+function toPcmFmt(f32, frames, fmt, dec) {
   const step = Math.max(1, Math.round(RATE / (fmt.rate || RATE))), ch = fmt.ch === 1 ? 1 : 2;
   if (step === 1 && ch === 2) return toPcm(f32, frames);
-  const m = Math.floor(frames / step);
+  if (!dec || dec.step !== step) dec = new Decimator(step);
+  const m = Math.floor((frames + dec.ph) / step);
   const buf = Buffer.alloc(m * ch * 2);
-  const k = 1 / step;
   const q = function (v) { return v >= 1 ? 32767 : (v <= -1 ? -32767 : (v * 32767) | 0); };
-  for (let j = 0; j < m; j++) {
-    let l = 0, r = 0;
-    for (let s = 0, i = j * step * 2; s < step; s++, i += 2) { l += f32[i]; r += f32[i + 1]; }
-    l *= k; r *= k;
-    if (ch === 1) buf.writeInt16LE(q((l + r) * 0.5), j * 2);
-    else { buf.writeInt16LE(q(l), j * 4); buf.writeInt16LE(q(r), j * 4 + 2); }
+  const fL = dec.f[0], fR = dec.f[1];
+  let j = 0, ph = dec.ph;
+  for (let i = 0; i < frames; i++) {
+    let l = f32[i * 2], r = f32[i * 2 + 1];
+    if (ch === 1) { l = (l + r) * 0.5; if (step > 1) l = fL[1].run(fL[0].run(l)); }
+    else if (step > 1) { l = fL[1].run(fL[0].run(l)); r = fR[1].run(fR[0].run(r)); }
+    if (++ph >= step) {
+      ph = 0;
+      if (j < m) {
+        if (ch === 1) buf.writeInt16LE(q(l), j * 2);
+        else { buf.writeInt16LE(q(l), j * 4); buf.writeInt16LE(q(r), j * 4 + 2); }
+      }
+      j++;
+    }
   }
-  return buf;
+  dec.ph = ph;
+  return j === m ? buf : buf.slice(0, Math.min(j, m) * ch * 2);
 }
 
 // Test-Sweep: Leerlauf -> Vollgas bis Abregeldrehzahl -> Schub -> Teillast
@@ -554,13 +576,33 @@ Engine.prototype._tick = function () {
   let due = Math.floor((now - this.t0 + LEAD_MS) / 1000 * RATE) - this.written;
   if (due > RATE / 2) { this.t0 = now; this.written = 0; due = Math.floor(LEAD_MS / 1000 * RATE); } // Resync nach Hänger
   const step = out.step();
+  // Kanal mit niedrigerer Rate (24 kHz): Synthese direkt in dieser Rate – halbe Rechenzeit, kein Umrechnen
+  const direct = step > 1 && RATE % step === 0;
+  if (direct && synth.sr !== RATE / step) this._rebuildSynth(RATE / step);
+  else if (!direct && synth.sr !== RATE) this._rebuildSynth(RATE);
   while (due >= step && !out.blocked && out.child) {
     let n = Math.min(due, MAX_CHUNK);
     n -= n % step;
-    synth.render(this.f32, n);
-    out.write(toPcmFmt(this.f32, n, out.fmt));
+    if (direct) {
+      const m = n / step;
+      this.synth.render(this.f32, m);
+      out.write(toPcmFmt(this.f32, m, { rate: RATE, ch: out.fmt.ch }));
+    } else {
+      this.synth.render(this.f32, n);
+      out.write(toPcmFmt(this.f32, n, out.fmt, out.dec));
+    }
     this.written += n; due -= n;
   }
+};
+
+/** Synth mit anderer Abtastrate neu anlegen; Einstellungen und Fahrzeugdaten bleiben erhalten. */
+Engine.prototype._rebuildSynth = function (rate) {
+  const old = this.synth, s = new Synth(rate);
+  s.configure(Object.assign({}, old.cfg));
+  s._setProfile(old.cfg.profile); s._reset();
+  s.target = Object.assign({}, old.target); s.stale = old.stale;
+  this.synth = s;
+  this.log('Synthese mit ' + rate + ' Hz');
 };
 
 // ---------------------------------------------------------------------------
@@ -769,7 +811,7 @@ function diagLines(r, extra) {
 module.exports = {
   probeAudio: probeAudio, diagLines: diagLines, scanAlsa: scanAlsa, findPython: findPython,
   probeSmartx: probeSmartx, smartxLines: smartxLines, usable: usable,
-  Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, toPcmFmt: toPcmFmt, sweepAt: sweepAt,
+  Engine: Engine, Output: Output, candidates: candidates, toPcm: toPcm, toPcmFmt: toPcmFmt, Decimator: Decimator, sweepAt: sweepAt,
   smartxEndpoints: smartxEndpoints, resolveSmartx: resolveSmartx, formatOf: formatOf, isSmartx: isSmartx,
   RATE: RATE, TICK_MS: TICK_MS, LEAD_MS: LEAD_MS, MAX_CHUNK: MAX_CHUNK
 };

@@ -27,3 +27,6 @@ __pycache__/
 *.dlt
 *.log
 *.core
+
+# Hörproben von kit/tools/iconix_calibrate.js --wav docs/sounds (lokal, nicht ins Repo)
+docs/sounds/

@@ -15,7 +15,7 @@
  *   node iconix-audiod.js                     Dienst starten
  *   node iconix-audiod.js --probe             verfügbare Abspielprogramme anzeigen
  *   node iconix-audiod.js --play-test         9 s Test-Sweep direkt abspielen
- *   node iconix-audiod.js --wav out.wav [--profile v8] [--seconds 10] [--pops] [--volume 0.8]
+ *   node iconix-audiod.js --wav out.wav [--profile v8] [--seconds 10] [--volume 0.8]
  *
  * Umgebungsvariablen:
  *   ICONIX_AUDIOD_SOCKET  zusätzlicher/ersetzender Socket-Pfad (Tests: Named Pipe unter Windows)
@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.6.0';
+const VERSION = '0.9.1';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];
@@ -183,7 +183,7 @@ function renderWav(file) {
   const seconds = Number(arg('--seconds', '9'));
   const synth = new Synth(RATE);
   synth.configure({
-    profile: profile, volume: Number(arg('--volume', '0.8')), pops: process.argv.indexOf('--pops') >= 0,
+    profile: profile, volume: Number(arg('--volume', '0.8')),
     intensity: Number(arg('--intensity', '0.7'))
   });
   synth._setProfile(Profiles.get(profile).id); synth.pending = null;

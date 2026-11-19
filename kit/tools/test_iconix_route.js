@@ -161,14 +161,124 @@ test('SmartX: Kanal auflösen, Format aus dem Namen, kein Rückfall auf andere G
   assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '80000', '1']);
 });
 
-test('Umrechnung 48 kHz Stereo -> 24 kHz Mono', () => {
-  const f = new Float32Array([0.5, 0.5, 1, 1, -1, -1, 0, 0]);
-  const b = E.toPcmFmt(f, 4, { rate: 24000, ch: 1 });
-  assert.strictEqual(b.length, 4);
-  assert.strictEqual(b.readInt16LE(0), (0.75 * 32767) | 0);
-  assert.strictEqual(b.readInt16LE(2), (-0.5 * 32767) | 0);
-  const s = E.toPcmFmt(f, 4, { rate: 48000, ch: 2 });
-  assert.strictEqual(s.length, 16);
+test('Umrechnung 48 -> 24 kHz: Tiefpass gegen Aliasing, tiefe Töne bleiben', () => {
+  const tone = (hz, n) => { const f = new Float32Array(n * 2); for (let i = 0; i < n; i++) f[i * 2] = f[i * 2 + 1] = 0.5 * Math.sin(2 * Math.PI * hz * i / 48000); return f; };
+  const rms = (b) => { let s = 0; const m = b.length / 2; for (let i = m / 2; i < m; i++) { const v = b.readInt16LE(i * 2) / 32767; s += v * v; } return Math.sqrt(s / (m / 2)); };
+  const n = 9600;
+  const low = E.toPcmFmt(tone(500, n), n, { rate: 24000, ch: 1 }, new E.Decimator(2));
+  const high = E.toPcmFmt(tone(18000, n), n, { rate: 24000, ch: 1 }, new E.Decimator(2)); // würde als 6 kHz zurückfallen
+  assert.strictEqual(low.length, n); // n/2 Frames x 2 Byte
+  assert.ok(rms(low) > 0.3, 'tiefer Ton bleibt: ' + rms(low));
+  assert.ok(rms(high) < 0.005, '18 kHz wird unterdrückt: ' + rms(high));
+  // Zustand über Blöcke: zwei halbe Blöcke = ein ganzer
+  const dec = new E.Decimator(2), t = tone(500, n);
+  const a = E.toPcmFmt(t.subarray(0, n), n / 2, { rate: 24000, ch: 1 }, dec);
+  const b = E.toPcmFmt(t.subarray(n), n / 2, { rate: 24000, ch: 1 }, dec);
+  assert.ok(Buffer.concat([a, b]).equals(low));
+  assert.strictEqual(E.toPcmFmt(t, n, { rate: 48000, ch: 2 }).length, n * 4);
+});
+
+// ---- Synthese (synth.js v2) ----------------------------------------------------
+const Synth = require(path.join(ROOT, 'tools/iconix-audiod/synth.js'));
+const Profiles = require(path.join(ROOT, 'tools/iconix-audiod/profiles.js'));
+function drive(id, sr, secs, fn) {
+  const s = new Synth(sr);
+  s.configure({ profile: id, volume: 1, intensity: 0.7 });
+  s._setProfile(id); s.pending = null; s._reset();
+  const blk = Math.round(sr / 100), f = new Float32Array(blk * 2), out = new Float32Array(Math.round(secs * sr));
+  let peak = 0;
+  for (let pos = 0; pos + blk <= out.length; pos += blk) {
+    s.setParams(fn(pos / sr));
+    peak = Math.max(peak, s.render(f, blk));
+    for (let i = 0; i < blk; i++) out[pos + i] = f[i * 2];
+  }
+  return { out, peak };
+}
+function bandShare(x, sr, hz) { // Energieanteil oberhalb hz (einfache DFT über Stichproben-Frequenzen)
+  let hi = 0, tot = 0;
+  for (let f = 20; f < sr / 2; f *= 1.06) {
+    let re = 0, im = 0;
+    for (let i = 0; i < x.length; i += 1) { const w = 2 * Math.PI * f * i / sr; re += x[i] * Math.cos(w); im += x[i] * Math.sin(w); }
+    const p = (re * re + im * im) * f; tot += p; if (f > hz) hi += p;
+  }
+  return hi / tot;
+}
+
+test('alle Profile: kein NaN, kein Übersteuern, kaum Energie über 2 kHz (nichts Schrilles)', () => {
+  for (const id of Profiles.ids) {
+    const r = drive(id, 24000, 5, (t) => t < 1 ? { rpm: 800, load: 0.05, speed: 0 } : { rpm: 1200 + 3500 * (t - 1) / 4, load: 1, speed: 30 + 60 * t / 5 });
+    assert.ok(r.out.every((v) => v === v), id + ': NaN');
+    assert.ok(r.peak <= 1 && r.peak > 0.05, id + ': Spitze ' + r.peak);
+    const share = bandShare(r.out.subarray(r.out.length - 4800), 24000, 2000);
+    assert.ok(share < 0.08, id + ': ' + (share * 100).toFixed(1) + ' % über 2 kHz');
+  }
+});
+
+test('Verbrenner: Grundton = Zündfrequenz der virtuellen Drehzahl (Profil-Abbildung)', () => {
+  const s = new Synth(24000);
+  s.configure({ profile: 'six', carIdle: 800, carRedline: 4800 });
+  s._setProfile('six');
+  const p = Profiles.get('six');
+  assert.strictEqual(s._virtualRpm(800), p.idleRpm);
+  assert.strictEqual(s._virtualRpm(4800), p.maxRpm);
+  assert.ok(p.maxRpm <= 6500, 'Drehzahlband nur leicht gestreckt');
+  // Zündfrequenz eines Reihensechsers bei 3000 U/min = 150 Hz: dort deutlich mehr Energie als bei 1000 Hz
+  const r = drive('six', 24000, 1.2, () => ({ rpm: 800 + (3000 - 750) / (6000 - 750) * 4000, load: 0.8, speed: 80 }));
+  const x = r.out.subarray(4800);
+  const at = (f) => { let re = 0, im = 0; for (let i = 0; i < x.length; i++) { const w = 2 * Math.PI * f * i / 24000; re += x[i] * Math.cos(w); im += x[i] * Math.sin(w); } return Math.hypot(re, im); };
+  assert.ok(at(150) > 5 * at(1000), 'Zündfrequenz dominiert: ' + at(150).toFixed(1) + ' vs ' + at(1000).toFixed(1));
+});
+
+test('Schub leiser als Last, ohne Übersteuern', () => {
+  const r = drive('v8', 24000, 9, (t) => t < 6 ? { rpm: 1100 + 3700 * t / 6, load: 1, speed: 80 } : { rpm: 4800 - 3200 * (t - 6) / 3, load: 0, overrun: true, speed: 90 });
+  const rms = (a) => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
+  const wot = rms(r.out.subarray(24000 * 3, 24000 * 6)), ovr = rms(r.out.subarray(24000 * 6.3));
+  assert.ok(ovr < wot * 0.3 && ovr > wot * 0.03, 'Schub ' + ovr.toFixed(3) + ' vs Last ' + wot.toFixed(3));
+  assert.ok(r.peak <= 1);
+});
+
+test('keine Knackser: niedrige Drehzahl unter Last, Schaltknicke, Gas weg (Spitzenfaktor im Hochpass)', () => {
+  for (const id of Profiles.ids.filter((i) => Profiles.get(i).kind !== 'electric')) {
+    const r = drive(id, 24000, 6, (t) => {
+      if (t < 4) { const g = t % 1; return { rpm: 1300 + 800 * g, load: g < 0.22 ? 0.25 : 1, speed: 50 }; }
+      return { rpm: 2600, load: t < 4.05 ? 1 : 0, overrun: t > 4.05, speed: 80 };
+    });
+    // Hochpass über die ganze Fahrt (Filter eingeschwungen), Spitze/RMS je 50 ms ab 0,5 s
+    const hp = new Synth.Biquad().set('hp', 1000, 0.7, 24000), y = r.out.map((v) => hp.run(v));
+    let worst = 0;
+    for (let w = 12000; w + 1200 <= y.length; w += 1200) {
+      let pk = 0, ss = 0;
+      for (let i = w; i < w + 1200; i++) { ss += y[i] * y[i]; if (Math.abs(y[i]) > pk) pk = Math.abs(y[i]); }
+      const rms = Math.sqrt(ss / 1200);
+      if (rms > 1e-5) worst = Math.max(worst, pk / rms);
+    }
+    assert.ok(worst < 8, id + ': Spitzenfaktor ' + worst.toFixed(1) + ' (Knackser?)');
+  }
+});
+
+test('keine Patscher, keine Schubumluft, kein Mechanik-Klicken, kein Turbo- oder Ansaugrauschen', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'tools/iconix-audiod/synth.js'), 'utf8');
+  assert.ok(!/popRate|popHeat|fBov|mechEnv|turboGain|fTurbo|inGain|fHelm/.test(src));
+  assert.ok(Profiles.list.every((p) => p.popRate === undefined && p.turbo === undefined && p.intake === undefined));
+});
+
+test('Rauschen nur als Hauch: mindestens 36 dB unter dem Motorton', () => {
+  const rms = (a) => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
+  for (const id of Profiles.ids.filter((i) => Profiles.get(i).kind !== 'electric')) {
+    const p = Profiles.get(id), rasp = p.rasp, fn = (t) => ({ rpm: 1100 + 3500 * t / 4, load: 1, speed: 60 });
+    const full = drive(id, 24000, 4, fn).out;
+    p.rasp = 0; const clean = drive(id, 24000, 4, fn).out; p.rasp = rasp;
+    const db = 20 * Math.log10(rms(full.map((v, i) => v - clean[i])) / rms(clean));
+    assert.ok(db < -36, id + ': Rauschen ' + db.toFixed(1) + ' dB');
+  }
+});
+
+test('Rechenzeit bei 24 kHz im Rahmen (Head Unit)', () => {
+  const s = new Synth(24000); s.configure({ profile: 'v10', volume: 1 }); s._setProfile('v10');
+  const f = new Float32Array(960), t0 = process.hrtime.bigint();
+  for (let k = 0; k < 250; k++) { s.setParams({ rpm: 1000 + (k % 50) * 76, load: 0.8, speed: 80 }); s.render(f, 480); }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6 / 5;
+  assert.ok(ms < 40, ms.toFixed(1) + ' ms pro Sekunde Audio');
 });
 
 test('Dienst rendert für einen 24-kHz-Mono-Kanal halb so viele Frames mit 2 Byte', () => {

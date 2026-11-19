@@ -2,14 +2,14 @@
   "id": "iconix_sounds",
   "title": "Iconix Sounds",
   "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), Tonweg zum Testen wählbar. Braucht das Tool Iconix Audio.",
-  "version": "0.6.0",
+  "version": "0.9.1",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
   "mguHmi": ["ID7", "ID8"],
   "autostart": true,
   "requires": {
-    "iconix-audiod": "0.6.0"
+    "iconix-audiod": "0.9.1"
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -114,12 +114,6 @@
         [90, "Stark"],
         [100, "Maximal"]
       ]
-    },
-    {
-      "key": "pops",
-      "label": "Pops & Bangs im Schub",
-      "type": "bool",
-      "default": false
     },
     {
       "key": "sport",

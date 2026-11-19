@@ -22,10 +22,10 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.6.0';
+const VERSION = '0.9.1';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
-  enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, pops: false, sport: false,
+  enabled: true, profile: Profiles.DEFAULT, volume: 60, intensity: 70, sport: false,
   muteParked: false, dialVolume: true, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
@@ -66,7 +66,6 @@ function startCore(host) {
       profile: Profiles.ids.indexOf(String(g('profile'))) >= 0 ? String(g('profile')) : Profiles.DEFAULT,
       volume: num(g('volume'), 60) / 100,
       intensity: num(g('intensity'), 70) / 100,
-      pops: bool(g('pops')),
       sport: bool(g('sport')),
       carIdle: feedCfg.carIdle,
       carRedline: num(g('carRedline'), 4800),
@@ -180,7 +179,9 @@ function audioStatus(c) {
   const key = a.text + '|' + a.ok + '|' + r;
   if (key !== audioCache.key) {
     const routeOk = !c.route.needsAm() || c.route.state === 'verbunden' || c.route.state === 'aus';
-    audioCache = { key, val: { ok: a.ok && routeOk, text: r + ' · ' + a.text.replace(/^Audio: /, '') } };
+    // langen Kanalnamen kürzen ("alsa:plug:smartx:Media_Overlay_…_CF_24_MONO" -> "SmartX")
+    const dev = a.text.replace(/^Audio: /, '').replace(/alsa:(plug:)?smartx:[^ ·]+/, 'SmartX');
+    audioCache = { key, val: { ok: a.ok && routeOk, text: r + ' · ' + dev } };
   }
   return audioCache.val;
 }
@@ -295,7 +296,7 @@ mgu.run({
       st.profile = cfg.profile;
       st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0; st.load = s ? s.load : 0;
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
-      st.sport = cfg.sport; st.pops = cfg.pops; st.demo = !s;
+      st.sport = cfg.sport; st.demo = !s;
       st.audio = audioStatus(c);
       st.hint = own ? HINT_TOUCH : (c.ui().dialVolume ? HINT_DIAL : '');
       st.diag = diag;

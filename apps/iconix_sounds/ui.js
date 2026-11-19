@@ -63,7 +63,7 @@
    * state = {
    *   profiles: [{id, name}], profile: 'v8',
    *   rpm, redline, speed, load (0..1), volume (0..1),
-   *   enabled, sport, pops, demo,
+   *   enabled, sport, demo,
    *   audio: { ok: bool, text: 'aplay · 44,1 kHz' }, hint: '...'
    * }
    */
@@ -126,11 +126,11 @@
     var sy = 490;
     var a = s.audio || { ok: false, text: 'Audio-Dienst nicht verbunden' };
     g.rrect(x0, sy - 20, 20, 20, 10, a.ok ? C.ok : C.crit);
-    g.text(a.text, x0 + 32, sy - 2, 24, C.dim, 'left', false);
+    // passt in die Breite bis zum rechten Rand (~62 Zeichen bei 24 px)
+    g.text(a.text.length > 62 ? a.text.slice(0, 61) + '…' : a.text, x0 + 32, sy - 2, 24, C.dim, 'left', false);
     var tags = [];
     if (s.demo) tags.push(['DEMO', C.warn]);
     if (s.sport) tags.push(['SPORT', C.warn]);
-    if (s.pops) tags.push(['POPS', C.accent2]);
     var tx = x1;
     for (i = tags.length - 1; i >= 0; i--) {
       var tw = tags[i][0].length * 15 + 28;
