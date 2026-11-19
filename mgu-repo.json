@@ -2,17 +2,27 @@
   "schema": 1,
   "apps": {
     "path": "apps/*",
-    "exclude": ["ambient_config", "brake_test", "car_vitals", "doom", "draggy", "dtc_scanner", "dyno", "edrive", "gforce", "live_adjustments", "live_data", "redline", "service", "warmup", "zf8hp"],
+    "exclude": [],
     "manifest": "app.json",
     "icon": "icon.png",
     "build": {
       "python": "kit/tools/build.py",
-      "args": ["{id}"],
+      "args": [
+        "{id}"
+      ],
       "sdk": "oap-sdk",
       "output": "dist/{id}@{version}.tgz",
-      "network": ["doom"],
-      "shared": ["kit/runtime", "kit/platform", "kit/localization", "kit/tools/build.py", "kit/tools/pack_data.py",
-        "kit/tools/localize.py", "kit/tools/locale-revisions.json", "kit/tools/oapgen", "oap-sdk"]
+      "shared": [
+        "kit/runtime",
+        "kit/platform",
+        "kit/localization",
+        "kit/tools/build.py",
+        "kit/tools/pack_data.py",
+        "kit/tools/localize.py",
+        "kit/tools/locale-revisions.json",
+        "kit/tools/oapgen",
+        "oap-sdk"
+      ]
     }
   },
   "tools": [
@@ -23,7 +33,10 @@
       "description": "Experimenteller Audio-Dienst für Iconix Sounds",
       "optional": true,
       "uninstallable": true,
-      "mguHmi": ["ID7", "ID8"]
+      "mguHmi": [
+        "ID7",
+        "ID8"
+      ]
     }
   ]
 }

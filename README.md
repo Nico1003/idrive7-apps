@@ -106,16 +106,19 @@ Deinstallieren geht ebenfalls über den Store.
 ## Für Entwickler
 
 Die Apps basieren auf dem Kit aus
-[cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps). Wie es
-funktioniert (App-Format, Fahrzeugsignale, Build, Emulator) steht in der
-**[Kit-Dokumentation](docs/kit.md)** (englisch).
+[cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps). Dieses
+Repository enthält nur den Teil des Kits, den die beiden Apps zum Bauen brauchen. Wie das Kit
+funktioniert (App-Format, Fahrzeugsignale, Build, Emulator), steht in der
+[Dokumentation des Originalprojekts](https://github.com/cauliflowermossgrape/idrive7-apps#readme)
+(englisch).
 
 | Pfad | Inhalt |
 |---|---|
 | `apps/drive_coach/` | Fahrstil-Coach: `coach.js` (Bewertung), `goals.js` (Level, Abzeichen), `main.js` (Bildschirm) |
 | `apps/iconix_sounds/` | Iconix Sounds: `car_route.js` (Audiomanager), `synth.js` (Klang), `main.js`, `ui.js` |
 | `tools/iconix-audiod/` | Audio-Dienst: Synthese und Ausgabe über SmartX/ALSA (`alsa_play.py`) |
-| `kit/` | Laufzeit, Build-Werkzeuge und Tests aus dem Kit |
+| `kit/runtime/` | Laufzeit des Kits (Bildschirm, Signale, Einstellungen), wird in jede App gepackt |
+| `kit/tools/` | `build.py` (baut die App, führt der Store auf dem Head Unit aus), `preview.js`, Tests |
 | `mgu-repo.json` | was der MGU Store aus diesem Repository anbietet |
 
 Tests laufen mit Node ohne Auto:
@@ -128,8 +131,8 @@ node kit/tools/test_drive_coach.js
 node kit/tools/test_iconix_route.js
 ```
 
-Die weiteren Apps im Ordner `apps/` stammen aus dem Originalprojekt und werden über diesen Store
-nicht angeboten (`exclude` in `mgu-repo.json`).
+Wer die übrigen Apps des Originalprojekts sucht (Redline, Dyno, Fault Scanner usw.), findet sie
+unter [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps).
 
 ---
 
@@ -144,5 +147,4 @@ nicht angeboten (`exclude` in `mgu-repo.json`).
 
 ## Lizenz
 
-[MIT](LICENSE). Hinweise zu Drittanbieter-Code stehen in [`third_party/`](third_party) und in der
-[Kit-Dokumentation](docs/kit.md#doom-and-renderer-licences).
+[MIT](LICENSE), wie das Kit des Originalprojekts.
