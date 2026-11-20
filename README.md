@@ -106,14 +106,14 @@ auf Front- und Hecklautsprecher brauchen; das gibt der Audiomanager bisher nicht
 Voraussetzung ist ein iDrive 7 (MGU) mit Root-Zugang und installiertem
 [MGU Store](https://github.com/robertnisipeanu/mgu-store).
 
-1. Im MGU Store dieses Repository als Quelle hinzufügen: `Nico1003/idrive7-apps`
+1. Im MGU Store dieses Repository als Quelle hinzufügen: `Nico1003/sound-drive`
 2. **Sound Drive** installieren. Das Tool **Sound Drive Audio** kommt als Abhängigkeit automatisch mit.
    (Wer „Iconix Sounds“ schon hat, bekommt den neuen Namen einfach als Update.)
 3. App öffnen, **Testsound** drücken – fertig. Updates kommen über den Store.
 
 Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden“ stehen. Wenn nicht,
 **Audio-Diagnose** öffnen, ein Foto machen, den nächsten **Tonweg** probieren und gern ein
-[Issue](https://github.com/Nico1003/idrive7-apps/issues) mit dem Foto anlegen.
+[Issue](https://github.com/Nico1003/sound-drive/issues) mit dem Foto anlegen.
 
 | Komponente | Version |
 |---|---|
