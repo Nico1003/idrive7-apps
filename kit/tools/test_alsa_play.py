@@ -150,6 +150,13 @@ def main():
     ok = rc == 0 and zeros_inside > 0 and 'underrun' in err and len(data) == len(payload) + pre * 2 + zeros_inside
     print(('ok  ' if ok else 'FAIL') + ' stockender Dienst: Stille nachgelegt (%d ms), als underrun gemeldet' % (zeros_inside // 2 * 1000 // RATE))
     fails += not ok
+    # zwei getrennte Hänger -> genau zwei Meldungen (je Stocken eine), Daten trotzdem vollständig
+    rc, pcm, rep, err = run(payload, stall_reads=set(range(4, 9)) | set(range(14, 19)))
+    n = err.count('underrun')
+    data = bytes(pcm.out)
+    ok = rc == 0 and n == 2 and len(data) > len(payload) + pre * 2
+    print(('ok  ' if ok else 'FAIL') + ' zwei Hänger -> zwei Meldungen (%d)' % n)
+    fails += not ok
     print('Alle alsa_play-Tests bestanden' if not fails else '%d Test(s) fehlgeschlagen' % fails)
     return 1 if fails else 0
 

@@ -1,4 +1,4 @@
-<h1 align="center">Iconix Sounds</h1>
+<h1 align="center">Sound Drive</h1>
 
 <p align="center">
   <b>Virtueller Motorsound für BMW mit iDrive 7 (MGU) – über die eigenen Lautsprecher, gesteuert von
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screens/iconix_sounds.png" alt="Iconix Sounds: Drehzahl, Profilwahl, Lautstärke, Last und Status des Tonwegs" width="100%">
+  <img src="docs/screens/sound_drive.png" alt="Sound Drive: Drehzahl, Status des Tonwegs, Profilwahl und Lautstärke" width="100%">
 </p>
 
 > **Hinweis.** Inoffizielles Hobbyprojekt, nicht von der BMW AG unterstützt oder mit ihr verbunden.
@@ -23,9 +23,9 @@
 
 ---
 
-## Was Iconix Sounds macht
+## Was Sound Drive macht
 
-Iconix Sounds erzeugt live einen Motorsound und spielt ihn über die Fahrzeuglautsprecher ab – ähnlich
+Sound Drive (früher „Iconix Sounds“) erzeugt live einen Motorsound und spielt ihn über die Fahrzeuglautsprecher ab – ähnlich
 wie BMWs eigenes „Active Sound Design“, aber mit wählbarem Charakter. Grundlage sind die echten
 Fahrzeugdaten: Drehzahl, Motormoment (Last) und Geschwindigkeit. Gibst du Gas, wird der Sound voller;
 beim Gleiten bleibt er dezent im Hintergrund, im Schub blubbert er leise aus.
@@ -35,7 +35,11 @@ beim Gleiten bleibt er dezent im Hintergrund, im Schub blubbert er leise aus.
   Hauptrohr, Schalldämpfer. Dazu kommt Körperschall über Motorlager und Karosserie. Die Karosserie
   dämpft die Höhen – so wie man einen Motor im Auto wirklich hört.
 - **Keine schrillen Töne, keine Knackser, kein Rauschen.** Kein Turbo-Pfeifen, keine Patscher, kein
-  Ansaugrauschen; nichts oberhalb von etwa 2 kHz. Prüfwerkzeuge im Repository messen das automatisch.
+  Ansaugrauschen. Einzige Ausnahme mit Absicht: das Zischen der Schubumluft beim Gaswegnehmen (Supra und
+  einige Turbo-Profile). Prüfwerkzeuge im Repository messen das automatisch.
+- **Oben im Drehzahlband lauter,** wie ein echter Motor – auch bei Teillast.
+- **Folgt dem Fahrmodus:** In Eco Pro dezent und dumpfer, in Comfort normal, in Sport lauter, offener und
+  bellender (mehr Zischen), in Sport+ noch etwas mehr. Der Wechsel geht weich über etwa eine Sekunde.
 - **Startet von selbst** mit dem Auto und läuft im Hintergrund – die App muss nicht geöffnet werden; schont das Head Unit
   (Klangberechnung direkt in 24 kHz, wenige Millisekunden Rechenzeit pro Sekunde Ton).
 
@@ -43,25 +47,30 @@ beim Gleiten bleibt er dezent im Hintergrund, im Schub blubbert er leise aus.
 
 | Profil | Charakter |
 |---|---|
-| **Sport Dezent** (Standard) | Gedämpfter Reihensechser mit Serienauspuff – leise beim Gleiten, sonor unter Last. Für den 220d gedacht: klingt bewusst nicht nach Diesel. |
-| **Reihensechser Sport** | Seidiger Sechszylinder mit Sportauspuff, dicht und voll unter Last. |
+| **Turbo Vierzylinder** (Standard) | Kernig und drehfreudig. |
+| **Turbo Vier Sport** | Wie der Vierzylinder, aber mit Sportauspuff: offener und bellender, leises Zischen beim Gaswegnehmen. |
+| **Supra Turbo** | Reihensechser mit Turbo im Supra-Stil: seidig und rauchig, deutliches Zischen der Schubumluft beim Gaswegnehmen nach Ladedruck. |
+| **Turbo Fünfzylinder** | Die ungerade Zündfolge gibt das typische Trällern, rau und kehlig. |
+| **Turbo Boxer** | Ungleich lange Krümmer je Seite: das bekannte Grummeln. |
 | **V8 Bariton** | Cross-Plane-V8 mit dem typischen ungleichmäßigen Blubbern. |
-| **Turbo Vierzylinder** | Kernig und drehfreudig. |
-| **Racing V10** | Voller, dichter Zehnzylinder mit begrenztem Drehzahlband. |
-| **Electric Drive** | Ruhiger, tiefer E-Antriebston, steigt mit der Geschwindigkeit. |
-| **Electric Space** | Schwebender, sphärischer E-Sound. |
+| **Racing V10** | Voller, dichter Zehnzylinder. |
 
 **Hörproben** (so, wie sie im Auto ankommen: 24 kHz mono; Leerlauf, Vollgas bis 4800 U/min, Schub,
 Konstantfahrt, Teillast):
-[Sport Dezent](docs/audio/iconix_sport_dezent.wav) ·
-[Reihensechser Sport](docs/audio/iconix_reihensechser.wav) ·
-[V8 Bariton](docs/audio/iconix_v8.wav)
+[Turbo Vierzylinder](docs/audio/sounddrive_turbo4.wav) ·
+[Supra Turbo](docs/audio/sounddrive_supra.wav) ·
+[Turbo Fünfzylinder](docs/audio/sounddrive_turbo5.wav)
 
 ### Bedienung und Einstellungen
 
-- Profil und Lautstärke per Antippen wählen; der iDrive-Knopf und die Lautstärkeregelung des Autos bleiben unangetastet
-- Lautstärke bis 150 % (über 100 % „Boost“: leise Passagen lauter, Spitzen begrenzt), **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
-- **Bei Telefon/Ansagen leiser:** Telefonate, Navi-Ansagen und Parkpiepser senken den Motorsound um etwa 12 dB ab
+- Profil und Lautstärke per Antippen wählen – große Knöpfe, zwei je Reihe, gut während der Fahrt zu treffen; der
+  iDrive-Knopf und die Lautstärkeregelung des Autos bleiben unangetastet
+- Lautstärke 0–100 % (100 % ist so laut wie früher 150 %: leise Passagen deutlich lauter, Spitzen begrenzt), **Ausprägung** (wie stark der Sound mit der Last aufmacht), Sport-Boost, stumm im Stand
+- **Sound folgt dem Fahrmodus** (abschaltbar) und **Breite Ansicht:** Standard ist die schmale Ansicht, die
+  rechts Platz für das Seitenfenster der geteilten Ansicht lässt; ohne Seitenfenster nutzt die breite Ansicht die
+  ganze Breite
+- **Bei Telefon/Ansagen leiser:** Telefonate, Sprachassistent, Parkpiepser und Warngongs senken den Motorsound um
+  etwa 12 dB ab; Navigationsansagen bewusst nicht
 - **Motor anpassen:** Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound
   bildet das echte Drehzahlband auf das Profil ab
 - **Experten:** Tonweg, Ausgabegerät und Lastquelle (zum Ausprobieren in anderen Autos)
@@ -72,7 +81,7 @@ Konstantfahrt, Teillast):
 
 ### So kommt der Ton in die Lautsprecher
 
-Store-Apps haben keine Audio-Schnittstelle. Deshalb erzeugt das Tool **Iconix Audio** (ein kleiner
+Store-Apps haben keine Audio-Schnittstelle. Deshalb erzeugt das Tool **Sound Drive Audio** (ein kleiner
 Dienst auf dem Head Unit) den Sound und schreibt ihn in einen Audiokanal des BMW-Systems (SmartX). Die
 App bittet den BMW-Audiomanager, diesen Kanal mit den Lautsprechern zu verbinden – nur solange Ton
 gebraucht wird.
@@ -80,6 +89,9 @@ gebraucht wird.
 Der **Tonweg** ist in den Einstellungen unter „Experten“ wählbar. Standard ist der **Overlay-Mix**: Der Motorsound
 liegt über der Musik, die weiterläuft. Weitere Wege (CarLife exklusiv, CarLife-Navi, MainSink,
 CarPlay-Kanal, ALSA direkt) sind zum Ausprobieren in anderen Autos und Ausstattungen gedacht.
+
+Der Overlay-Kanal ist mono. Ein räumlicher Klang (Auspuff hinten, Motor vorne) würde zwei getrennte Kanäle
+auf Front- und Hecklautsprecher brauchen; das gibt der Audiomanager bisher nicht her.
 
 ---
 
@@ -89,7 +101,8 @@ Voraussetzung ist ein iDrive 7 (MGU) mit Root-Zugang und installiertem
 [MGU Store](https://github.com/robertnisipeanu/mgu-store).
 
 1. Im MGU Store dieses Repository als Quelle hinzufügen: `Nico1003/idrive7-apps`
-2. **Iconix Sounds** installieren. Das Tool **Iconix Audio** kommt als Abhängigkeit automatisch mit.
+2. **Sound Drive** installieren. Das Tool **Sound Drive Audio** kommt als Abhängigkeit automatisch mit.
+   (Wer „Iconix Sounds“ schon hat, bekommt den neuen Namen einfach als Update.)
 3. App öffnen, **Testsound** drücken – fertig. Updates kommen über den Store.
 
 Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden“ stehen. Wenn nicht,
@@ -98,8 +111,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Iconix Sounds (App) | 0.9.5 |
-| Iconix Audio (Tool) | 0.9.5 |
+| Sound Drive (App) | 0.9.8 |
+| Sound Drive Audio (Tool) | 0.9.8 |
 
 ---
 
@@ -138,7 +151,7 @@ einem Fahrlehrer auf dem Beifahrersitz:
 
 | Pfad | Inhalt |
 |---|---|
-| `apps/iconix_sounds/` | Iconix Sounds: `main.js`, `ui.js`, `car_route.js` (Audiomanager), `synth.js` + `profiles.js` (Klang) |
+| `apps/iconix_sounds/` | Sound Drive: `main.js`, `ui.js`, `car_route.js` (Audiomanager), `synth.js` + `profiles.js` (Klang) |
 | `tools/iconix-audiod/` | Audio-Dienst: Synthese und Ausgabe über SmartX/ALSA (`engine.js`, `alsa_play.py`) |
 | `apps/drive_coach/` | Fahrstil-Coach: `coach.js` (Bewertung), `goals.js` (Level, Abzeichen), `main.js` |
 | `kit/runtime/` | Laufzeit des Kits (Bildschirm, Signale, Einstellungen), wird in jede App gepackt |
@@ -167,12 +180,23 @@ node kit/tools/test_drive_coach.js
 python3 kit/tools/test_alsa_play.py
 ```
 
+```bash
+node kit/tools/test_engine_e2e.js
+```
+
+```bash
+node kit/tools/iconix_soak.js
+```
+
 Dieselben Prüfungen laufen bei jedem Push als GitHub-Action (`.github/workflows/app-tests.yml`).
 
 `test_iconix_route.js` prüft Tonweg, Umrechnung und Klang (keine Höhen, keine Knackser, kaum
 Rauschen); `iconix_calibrate.js` misst Pegel und Klangbild je Profil und schreibt Hörproben;
 `iconix_popscan.js` sucht in einer Fahrt mit Schaltvorgängen nach Knacksern; `test_alsa_play.py` prüft den
-Python-Player mit einer simulierten Soundkarte.
+Python-Player mit einer simulierten Soundkarte; `test_engine_e2e.js` startet den Dienst mit echtem Player-Prozess und
+misst die Verzögerung; `iconix_soak.js` fährt jedes Profil in jedem Fahrmodus und jeder Lautstärke durch alle
+Fahrsituationen (Kaltstart, Schalten, Kickdown, Schub, Telefon, Profil- und Moduswechsel, Stumm, Datenlücke,
+Extremwerte, Abwürgen) und prüft auf NaN, Übersteuern, Knacken und Stille.
 
 Der Klang folgt dem physikalisch informierten Ansatz von Baldan et al. (2015, „Physically informed car
 engine sound synthesis“) und den offenen Projekten

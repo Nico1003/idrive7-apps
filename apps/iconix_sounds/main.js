@@ -1,6 +1,9 @@
 'use strict';
+// Vor dem Laden des Kits: Das Kit hält sonst den iDrive-Controller, solange es den Bildschirm führt (GPU-Renderer),
+// und das Drehrad wandert über unsere Knöpfe statt die Musik zu regeln. Bedienung der Seite per Touch.
+process.env.MGU_NO_GRAB = '1';
 /*
- * Iconix Sounds – App für den mgu-store (Format: idrive7-apps-Kit, mgu.run)
+ * Sound Drive – App für den mgu-store (Format: idrive7-apps-Kit, mgu.run)
  *
  * Aufgaben der App:
  *   - Fahrzeugdaten lesen (vehicle_feed.js) und an den Audio-Daemon schicken (audio_link.js)
@@ -22,11 +25,11 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.5';
+const VERSION = '0.9.8';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 80, intensity: 70, sport: false,
-  muteParked: false, duck: true, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, duck: true, followMode: true, wide: false, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -51,6 +54,7 @@ function startCore(host) {
   // Einstellungen werden nur bei Änderungen gelesen und dann zwischengespeichert –
   // nicht in jedem Frame bzw. bei jedem Drehzahl-Update.
   let parkedMute = false;
+  let driveMode = null;      // Fahrerlebnisschalter: eco | comfort | sport | sportplus
   let last = null;
   let feedCfg = null, synthCfgCache = null, uiCfg = null;
 
@@ -64,19 +68,20 @@ function startCore(host) {
     synthCfgCache = {
       enabled: bool(g('enabled')) && !parkedMute,
       profile: Profiles.ids.indexOf(String(g('profile'))) >= 0 ? String(g('profile')) : Profiles.DEFAULT,
-      volume: num(g('volume'), 80) / 100,
+      volume: Math.min(100, num(g('volume'), 80)) / 100,
       intensity: num(g('intensity'), 70) / 100,
       sport: bool(g('sport')),
       carIdle: feedCfg.carIdle,
       carRedline: num(g('carRedline'), 4800),
       route: CarRoute.ROUTES[String(g('route'))] ? String(g('route')) : CarRoute.DEFAULT_ROUTE,
       device: 'auto',
-      duck: false
+      duck: false,
+      mode: bool(g('followMode')) ? driveMode : null
     };
     // Gerät für den Dienst: SmartX-Kanal des Tonwegs, bei "ALSA direkt" das frühere Ausgabegerät
     const rt = CarRoute.route(synthCfgCache.route);
     synthCfgCache.device = rt.device || String(g('alsaDevice') || 'auto');
-    uiCfg = { muteParked: bool(g('muteParked')), duck: bool(g('duck')) };
+    uiCfg = { muteParked: bool(g('muteParked')), duck: bool(g('duck')), wide: bool(g('wide')) };
   };
   refresh();
 
@@ -92,6 +97,9 @@ function startCore(host) {
     const shouldMute = uiCfg.muteParked && s.speed < 0.5;
     if (shouldMute !== parkedMute) { parkedMute = shouldMute; pushCfg(); }
   });
+
+  // Fahrmodus: Sound wird in Eco dezenter, in Sport aggressiver (Einstellung "Sound folgt dem Fahrmodus")
+  feed.on('mode', m => { driveMode = m; log.info('iconix: Fahrmodus ' + m); pushCfg(); });
 
   pushCfg();
   link.connect();
@@ -167,14 +175,14 @@ function audioStatus(c) {
   return audioCache.val;
 }
 
-// Diagnosezeilen auf Bildschirmbreite umbrechen (~68 Zeichen)
+// Diagnosezeilen auf die Breite der Seite umbrechen (~64 Zeichen)
 function wrapLines(lines) {
   const out = [];
   lines.forEach(l => {
     let s = String(l);
-    while (s.length > 68) {
-      const cut = Math.max(s.lastIndexOf(', ', 68), s.lastIndexOf(' ', 68));
-      const i = cut > 20 ? cut + 1 : 68;
+    while (s.length > 64) {
+      const cut = Math.max(s.lastIndexOf(', ', 64), s.lastIndexOf(' ', 64));
+      const i = cut > 20 ? cut + 1 : 64;
       out.push(s.slice(0, i));
       s = '   ' + s.slice(i).replace(/^\s+/, '');
     }
@@ -201,7 +209,7 @@ mgu.run({
 
     const nextProfile = () => set('profile', Profiles.next(String(get('profile')), 1));
     const changeVolume = steps => {
-      const v = Math.max(0, Math.min(150, Math.round((num(get('volume'), 80) + steps * 5) / 5) * 5));
+      const v = Math.max(0, Math.min(100, Math.round((num(get('volume'), 80) + steps * 5) / 5) * 5));
       set('volume', v);
     };
 
@@ -232,8 +240,10 @@ mgu.run({
       else if (h.act === 'diagClose') diag = null;
       else if (h.act === 'diagDevTest') c.link.testDevices();
     };
-    const HITS_DIAG = UI.hitsDiag().map(h => Object.assign({ run: () => act(h) }, h));
-    const HITS = UI.hits(Profiles.list).map(h => Object.assign({ run: () => act(h) }, h));
+    // Touch-Ziele je Ansicht (schmal: Seitenfenster frei, breit: ganze Seite)
+    const mkHits = wide => ({ main: UI.hits(Profiles.list, wide).map(h => Object.assign({ run: () => act(h) }, h)),
+      diag: UI.hitsDiag(wide).map(h => Object.assign({ run: () => act(h) }, h)) });
+    const HITS_BY = { narrow: mkHits(false), wide: mkHits(true) };
 
     // Zwei Betriebsarten des Kits (kit/runtime/display.js):
     //  - "Kit führt den Bildschirm" (cv.own: GPU-Renderer mit Touch-Weiterleitung): Touch und der iDrive-Knopf
@@ -241,12 +251,12 @@ mgu.run({
     //    ctx.controller.onInput bekommt dann nichts (das Kit wertet den Knopf selbst aus).
     //  - sonst: Bedienung über die Knöpfe der Seite (Sound wechseln, Stumm, Testsound) und die Einstellungen.
     // Der iDrive-Knopf wird bewusst NICHT mehr belegt (controller.grab): Er blieb sonst auch außerhalb der App
-    // gefangen und regelte nur noch Iconix statt der Musik.
+    // gefangen und regelte nur noch Sound Drive statt der Musik.
     let own = false;
     if (ctx.controller && ctx.controller.grab) { try { ctx.controller.grab(false); } catch (e) { /* egal */ } }
     // Rückfall: Tippen ohne Ziel (falls ein Kit-Stand Taps nur über onTap liefert)
     if (ctx.onTap) {
-      ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y, !!diag); if (h) act(h); });
+      ctx.onTap((x, y) => { const h = UI.hitAt(Profiles.list, x, y, !!diag, c.ui().wide); if (h) act(h); });
     }
 
     // Bildschirm (wie apps/redline/main.js): pro Frame ctx.canvas(W, H) holen – das Kit gibt denselben,
@@ -254,7 +264,6 @@ mgu.run({
     // Mit GPU-Renderer ruft das Kit die Schleife bis zu 60x/s; ein Frame ohne Änderung wird nicht gesendet.
     // Ohne Renderer (PNG-Weg) gilt die angefragte Rate: 20 fps reichen für die Drehzahlanzeige.
     // Das Zustandsobjekt wird wiederverwendet (keine Allokation pro Frame).
-    const HINT_TOUCH = 'Antippen oder iDrive: Sound und Lautstärke wählen';
     // Nur neu zeichnen, wenn sich etwas Sichtbares ändert: höchstens 30 Bilder/s beim Fahren, sonst 1/s.
     // Der GPU-Renderer ruft die Schleife bis zu 60x/s auf – ohne diese Bremse würde jedes Mal gezeichnet.
     const st = { profiles: Profiles.list };
@@ -263,8 +272,8 @@ mgu.run({
       const s = c.last();
       const cfg = c.synthCfg();
       const a = audioStatus(c), now = Date.now();
-      const key = cfg.profile + '|' + cfg.enabled + '|' + cfg.volume + '|' + cfg.sport + '|' + cfg.carRedline + '|' +
-        (s ? Math.round(s.rpm / 10) + '|' + Math.round(s.speed) + '|' + Math.round(s.load * 40) : '-') + '|' + a.text + '|' + a.ok + '|' +
+      const key = cfg.profile + '|' + cfg.enabled + '|' + cfg.volume + '|' + cfg.sport + '|' + cfg.mode + '|' + c.ui().wide + '|' + cfg.carRedline + '|' +
+        (s ? Math.round(s.rpm / 10) + '|' + Math.round(s.speed) : '-') + '|' + a.text + '|' + a.ok + '|' +
         (diag ? diag.page + ':' + diag.lines.length : '');
       if (now - lastDraw < 33 || (key === lastKey && now - lastDraw < 1000)) return undefined;
       lastKey = key; lastDraw = now;
@@ -272,16 +281,15 @@ mgu.run({
       const g = kitGfx(cv);
       if (!!cv.own !== own) { own = !!cv.own; log.info('iconix: Kit führt den Bildschirm: ' + own); lastKey = ''; }
       st.profile = cfg.profile;
-      st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0; st.load = s ? s.load : 0;
+      st.rpm = s ? s.rpm : 0; st.speed = s ? s.speed : 0;
       st.redline = cfg.carRedline; st.volume = cfg.volume; st.enabled = cfg.enabled;
-      st.sport = cfg.sport; st.demo = !s;
+      st.sport = cfg.sport; st.demo = !s; st.mode = cfg.mode; st.wide = c.ui().wide;
       st.audio = a;
-      st.hint = own ? HINT_TOUCH : '';
       st.diag = diag;
       UI.draw(g, st);
       // Ziele nach dem Zeichnen registrieren (wie apps/dyno, live_data: nur wenn cv.own)
       if (own && typeof cv.target === 'function') {
-        const list = diag ? HITS_DIAG : HITS;
+        const hb = HITS_BY[c.ui().wide ? 'wide' : 'narrow'], list = diag ? hb.diag : hb.main;
         for (let i = 0; i < list.length; i++) { const h = list[i]; cv.target(h.x, h.y, h.w, h.h, h.run, h.key, h.r); }
       }
       return ctx.ui.image('MAIN_GFX', cv);

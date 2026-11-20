@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Iconix Sounds – Tonausgabe aus Sicht der App
+ * Sound Drive – Tonausgabe aus Sicht der App
  *
  * 1. Bevorzugt: Audio-Dienst (Tool iconix-audiod, läuft als root) über einen Unix-Socket.
  *    Es werden mehrere Pfade probiert: /run/iconix-audiod/audiod.sock, /tmp/iconix-audiod.sock.
@@ -224,7 +224,7 @@ class AudioLink extends EventEmitter {
       running = st && Date.now() - (st.at || 0) < 10000;
     } catch (e) { running = false; }
     if (running) return 'Dienst läuft, Socket nicht erreichbar (' + (codes[0] || '?') + ')';
-    if (codes.length && codes.every(c => c === 'ENOENT')) return 'Dienst läuft nicht – Tool "Iconix Audio" installiert?';
+    if (codes.length && codes.every(c => c === 'ENOENT')) return 'Dienst läuft nicht – Tool "Sound Drive Audio" installiert?';
     return codes[0] || 'unbekannt';
   }
 

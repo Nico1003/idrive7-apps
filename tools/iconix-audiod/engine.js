@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Iconix Sounds – Audio-Kern (nur Node, Node-8-kompatibel)
+ * Sound Drive – Audio-Kern (nur Node, Node-8-kompatibel)
  *
  * Synthese (synth.js) + Abspielprogramm (aplay/pacat/pw-cat/gst) + Taktgeber. Wird genutzt von:
  *   - tools/iconix-audiod/iconix-audiod.js  (Root-Dienst, Socket-Server)
@@ -19,24 +19,24 @@ const Synth = require('./synth');
 
 // Synthese-Rate: 48 kHz wie die SmartX-Kanäle des Head Units (24-kHz-Kanäle bekommen je 2 Frames gemittelt)
 const RATE = Number(process.env.ICONIX_RATE) || 48000;
-const TICK_MS = 20;          // 50 Wakeups/s, solange Ton läuft (Blöcke à 960 Samples)
+const TICK_MS = 10;          // 100 Wakeups/s, solange Ton läuft – kleine Blöcke erlauben knappen Vorlauf
 const IDLE_TICK_MS = 200;    // ohne Ton nur 5 Wakeups/s; neue Fahrzeugdaten oder Testsound wecken sofort
 // so viel Audio liegt höchstens vor (muss > TICK_MS + Jitter des Head Units sein). 160 ms gibt Reserve,
 // wenn Node auf dem Head Unit kurz hängt (GC, andere Apps) – sonst knackt/stottert es (Underrun).
 const LEAD_MS = Number(process.env.ICONIX_LEAD_MS) || 160;
 // Mit Rückmeldung des Players (alsa_play.py meldet gespielte Frames): so viel Ton steht höchstens an
 // (ALSA-Puffer + Pipe). Das ist die Verzögerung zwischen Fahrzeugdaten und Lautsprecher.
-// Untergrenze 70 ms (siehe FB_LEAD_START für den Start und die Anpassung).
-const FB_LEAD_MS = Number(process.env.ICONIX_FB_LEAD_MS) || 70;
+// Untergrenze 50 ms (siehe FB_LEAD_START für den Start und die Anpassung).
+const FB_LEAD_MS = Number(process.env.ICONIX_FB_LEAD_MS) || 50;
 const FB_LEAD_MAX = 200;
-// Start großzügig (Head Unit beim Hochfahren ausgelastet -> sonst Aussetzer/Quietschen), danach alle 20 s
+// Start großzügig (Head Unit beim Hochfahren ausgelastet -> sonst Aussetzer/Quietschen), danach alle 10 s
 // ohne Aussetzer 10 ms knapper bis FB_LEAD_MS; bei einem Aussetzer sofort +30 ms.
-const FB_LEAD_START = 120;
+const FB_LEAD_START = 100;
 const BUFFER_US = Number(process.env.ICONIX_BUFFER_US) || 200000; // Puffer des Abspielprogramms
 const STALE_MS = 1500;       // ohne Daten -> ausblenden
 const IDLE_STOP_MS = 8000;   // so lange still -> Abspielprogramm beenden (gibt das Audiogerät frei)
 const MAX_CHUNK = 4096;
-const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 40000; // SmartX: kurzer Puffer
+const SMARTX_BUFFER_US = Number(process.env.ICONIX_SMARTX_BUFFER_US) || 30000; // SmartX: kurzer Puffer
 const SMARTX_RETRY_MS = 3000; // SmartX-Kanal ließ sich nicht öffnen -> so oft erneut probieren
 
 // ---------------------------------------------------------------------------
@@ -557,7 +557,7 @@ Engine.prototype.start = function () {
   this._loop();
 };
 
-// Taktgeber: 20 ms, solange Ton läuft oder gewünscht ist, sonst 200 ms (spart im Stand/ohne Daten fast alles)
+// Taktgeber: 10 ms, solange Ton läuft oder gewünscht ist, sonst 200 ms (spart im Stand/ohne Daten fast alles)
 Engine.prototype._busy = function () {
   return !!(this.out.child || this.wantSound || this.devTest || Date.now() < this.testUntil);
 };
@@ -584,7 +584,7 @@ Engine.prototype.stop = function () {
 Engine.prototype._tick = function () {
   const now = Date.now(), synth = this.synth, out = this.out;
   // zählt Wakeups, die so spät kamen, dass der Vorlauf aufgebraucht war
-  if (out.child && now - this.lastTick > LEAD_MS) this.late++;
+  if (out.child && now - this.lastTick > (out.played != null ? (this.fbLead || FB_LEAD_START) : LEAD_MS)) this.late++;
   this.lastTick = now;
   if (this.devTest && now >= this.devTest.until) this._nextTestDevice();
   const testing = now < this.testUntil;
@@ -633,7 +633,7 @@ Engine.prototype._tick = function () {
     if ((out.underruns || 0) > this.fbUnder) {
       this.fbUnder = out.underruns; this.fbCalm = now;
       if (this.fbLead < FB_LEAD_MAX) { this.fbLead = Math.min(FB_LEAD_MAX, this.fbLead + 30); this.log('Aussetzer – Vorlauf jetzt ' + this.fbLead + ' ms'); }
-    } else if (now - this.fbCalm > 20000 && this.fbLead > FB_LEAD_MS) { this.fbLead = Math.max(FB_LEAD_MS, this.fbLead - 10); this.fbCalm = now; }
+    } else if (now - this.fbCalm > 10000 && this.fbLead > FB_LEAD_MS) { this.fbLead = Math.max(FB_LEAD_MS, this.fbLead - 10); this.fbCalm = now; }
     const queued = this.written / step - out.played;
     due = Math.floor((this.fbLead / 1000 * RATE / step - queued)) * step;
   } else {

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Startet den Iconix-Audio-Dienst mit dem Node des Head Units.
+# Startet den Audio-Dienst von Sound Drive mit dem Node des Head Units.
 # (BusyBox-sh-kompatibel; Datei muss LF-Zeilenenden haben.)
 DIR="$(cd "$(dirname "$0")" && pwd)"
 

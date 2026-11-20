@@ -29,8 +29,8 @@
     {
       "id": "iconix-audiod",
       "path": "tools/iconix-audiod",
-      "title": "Iconix Audio",
-      "description": "Experimenteller Audio-Dienst für Iconix Sounds",
+      "title": "Sound Drive Audio",
+      "description": "Experimenteller Audio-Dienst für Sound Drive",
       "optional": true,
       "uninstallable": true,
       "mguHmi": [

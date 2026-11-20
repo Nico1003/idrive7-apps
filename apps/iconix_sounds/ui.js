@@ -1,5 +1,10 @@
 /*
- * Iconix Sounds – Hauptbildschirm (1600 x 520) im Stil von BMW iDrive 7
+ * Sound Drive – Hauptbildschirm (1600 x 520) im Stil von BMW iDrive 7
+ *
+ * Aufbau: links "Sound Drive", darunter der Drehzahlmesser und der Status; rechts der aktive Sound, große
+ * Profil-Knöpfe (zwei je Reihe, gut während der Fahrt zu treffen) und die Lautstärke.
+ * Standard: alles links von x = 1140, denn mit geteilter Ansicht verdeckt das Seitenfenster von iDrive 7 den
+ * rechten Teil der Seite. "Breite Ansicht" (ohne Seitenfenster) nutzt die ganze Breite.
  *
  * Gestaltung angelehnt an iDrive 7 und das digitale Kombiinstrument: dunkler, leicht blauer Grund,
  * dünne Linien, Light-Schrift für Zahlen und Titel, BMW-Blau als einzige Akzentfarbe, flache Kacheln
@@ -28,40 +33,45 @@
     accent: '#1c69d4', accent2: '#5fa3ff', hi: '#2f7fe6',
     warn: '#ffb020', crit: '#e8332f', ok: '#3fbf7f'
   };
+  var TX = 230, TY = 262, TR = 172;  // Drehzahlmesser: Mitte und Radius
   var A0 = Math.PI * 0.75, A1 = Math.PI * 2.25; // 135° .. 405° (270°-Skala wie im Kombiinstrument)
 
   function pct(x) { return Math.round(x * 100) + ' %'; }
+  var MODE_TAG = { eco: ['ECO', '#3fbf7f'], sport: ['SPORT', '#5fa3ff'], sportplus: ['SPORT+', '#e8332f'] };
 
   // Geometrie der bedienbaren Flächen – EINE Quelle für Zeichnen, Touch-Ziele im Auto (cv.target)
   // und Klicks im Simulator.
-  var X0 = 620, X1 = 1556, CW = 225, CH = 50, GAP = 12, CHIP_Y = 186;
-  var VY = 352, VB = 56;           // Lautstärke-Zeile, Breite der −/+-Knöpfe
+  var X1_NARROW = 1132, X1_WIDE = 1572;
+  var X0 = 488, X1 = X1_NARROW, COLS = 2, GAP = 16, CW = (X1 - X0 - GAP) / 2, CH = 66, RGAP = 12, CHIP_Y = 84;
+  function setWide(wide) { X1 = wide ? X1_WIDE : X1_NARROW; CW = (X1 - X0 - GAP) / 2; }
+  var VY = 430, VB = 66;           // Lautstärke-Zeile, Größe der −/+-Knöpfe
   function chipRect(i) {
-    return { x: X0 + (i % 4) * (CW + GAP), y: CHIP_Y + Math.floor(i / 4) * (CH + GAP), w: CW, h: CH, r: 6 };
+    return { x: X0 + (i % COLS) * (CW + GAP), y: CHIP_Y + Math.floor(i / COLS) * (CH + RGAP), w: CW, h: CH, r: 8 };
   }
-  /** Bedienbare Flächen: [{ key, act, arg, x, y, w, h, r }] – act: 'profile' | 'vol' | 'mute' */
-  function hits(profiles) {
+  /** Bedienbare Flächen: [{ key, act, arg, x, y, w, h, r }] – act: 'profile' | 'vol' */
+  function hits(profiles, wide) {
+    setWide(wide);
     var out = [], i, c;
     for (i = 0; i < profiles.length; i++) {
       c = chipRect(i);
       out.push({ key: 'profile:' + profiles[i].id, act: 'profile', arg: profiles[i].id, x: c.x, y: c.y, w: c.w, h: c.h, r: c.r });
     }
-    out.push({ key: 'vol-', act: 'vol', arg: -1, x: X0, y: VY, w: VB, h: VB, r: 6 });
-    out.push({ key: 'vol+', act: 'vol', arg: 1, x: X1 - VB, y: VY, w: VB, h: VB, r: 6 });
-    out.push({ key: 'mute', act: 'mute', arg: null, x: X1 - 200, y: VY - 46, w: 200, h: 40, r: 6 });
+    out.push({ key: 'vol-', act: 'vol', arg: -1, x: X0, y: VY, w: VB, h: VB, r: 8 });
+    out.push({ key: 'vol+', act: 'vol', arg: 1, x: X1 - VB, y: VY, w: VB, h: VB, r: 8 });
     return out;
   }
   // Diagnose-Ansicht: Geräte testen / Weiter / Schließen
-  var DIAG_LINES = 11;
-  function hitsDiag() {
+  var DIAG_LINES = 12;
+  function hitsDiag(wide) {
+    if (wide !== undefined) setWide(wide);
     return [
-      { key: 'diag-devtest', act: 'diagDevTest', arg: null, x: X1 - 744, y: 452, w: 260, h: 50, r: 6 },
-      { key: 'diag-next', act: 'diagNext', arg: null, x: X1 - 472, y: 452, w: 220, h: 50, r: 6 },
-      { key: 'diag-close', act: 'diagClose', arg: null, x: X1 - 240, y: 452, w: 240, h: 50, r: 6 }
+      { key: 'diag-devtest', act: 'diagDevTest', arg: null, x: X1 - 640, y: 458, w: 220, h: 48, r: 6 },
+      { key: 'diag-next', act: 'diagNext', arg: null, x: X1 - 408, y: 458, w: 190, h: 48, r: 6 },
+      { key: 'diag-close', act: 'diagClose', arg: null, x: X1 - 206, y: 458, w: 206, h: 48, r: 6 }
     ];
   }
-  function hitAt(profiles, x, y, diag) {
-    var h = diag ? hitsDiag() : hits(profiles);
+  function hitAt(profiles, x, y, diag, wide) {
+    var h = diag ? hitsDiag(!!wide) : hits(profiles, !!wide);
     for (var i = 0; i < h.length; i++) if (x >= h[i].x && x <= h[i].x + h[i].w && y >= h[i].y && y <= h[i].y + h[i].h) return h[i];
     return null;
   }
@@ -77,90 +87,89 @@
     if (!p) return '';
     if (p.kind === 'electric') return 'Elektro';
     var n = p.layout ? p.layout.length : 0;
-    var v = { v8: 'V8', v10: 'V10' }[p.id];
-    return 'Verbrenner · ' + (v || (n ? n + ' Zylinder' : ''));
+    var v = { v8: 'V8', v10: 'V10', boxer: 'Boxer · 4 Zylinder' }[p.id];
+    return (v || (n ? n + ' Zylinder' : '')) + (p.bov || /turbo/.test(p.id) ? ' · Turbo' : '');
+  }
+
+  // Statuszeile auf höchstens zwei Zeilen à n Zeichen umbrechen (an " · ")
+  function wrap2(t, n) {
+    if (t.length <= n) return [t];
+    var parts = t.split(' · '), a = '', i = 0;
+    while (i < parts.length && (a ? a + ' · ' + parts[i] : parts[i]).length <= n) { a = a ? a + ' · ' + parts[i] : parts[i]; i++; }
+    if (!a) return [t.slice(0, n), t.length > 2 * n ? t.slice(n, 2 * n - 1) + '…' : t.slice(n)];
+    var b = parts.slice(i).join(' · ');
+    return [a, b.length > n ? b.slice(0, n - 1) + '…' : b];
   }
 
   /**
    * state = {
-   *   profiles: [{id, name, kind, layout}], profile: 'v8',
-   *   rpm, redline, speed, load (0..1), volume (0..1),
+   *   profiles: [{id, name, kind, layout}], profile: 'turbo4',
+   *   rpm, redline, speed, volume (0..1),
    *   enabled, sport, demo,
-   *   audio: { ok: bool, text: '…' }, hint: '...'
+   *   audio: { ok: bool, text: '…' }
    * }
    */
   function draw(g, s) {
-    // Grund: einfarbig dunkel mit leichtem Blaustich (wie die iDrive-7-Oberfläche)
+    setWide(!!s.wide);
     g.rect(0, 0, W, H, C.bg);
 
+    // ---- links: App-Name, Drehzahlmesser, Status --------------------------
+    g.text('Sound Drive', 28, 46, 30, C.text, 'left', 'light');
+    // Marken neben dem Titel: Fahrmodus (dem der Sound folgt), Sport-Boost, Demo
+    var tags = [], tx = 216, m = MODE_TAG[s.mode];
+    if (m) tags.push(m);
+    if (s.sport) tags.push(['BOOST', C.accent2]);
+    if (s.demo) tags.push(['DEMO', C.warn]);
+    for (var t = 0; t < tags.length && tx < 440; t++) {
+      var tw = tags[t][0].length * 12 + 26;
+      tile(g, tx, 22, tw, 32, 16, C.bg, tags[t][1]);
+      g.text(tags[t][0], tx + tw / 2, 45, 16, tags[t][1], 'center', true);
+      tx += tw + 8;
+    }
     drawTacho(g, s);
-    if (s.diag) { drawDiag(g, s); if (s.hint) g.text(s.hint, 300, 508, 20, C.faint, 'center', 'light'); return; }
+    var a = s.audio || { ok: false, text: 'Audio-Dienst nicht verbunden' };
+    var ls = wrap2(a.text, 40);
+    g.rrect(28, 470 - 13, 12, 12, 6, a.ok ? C.ok : C.crit);
+    for (var j = 0; j < ls.length; j++) g.text(ls[j], 50, 470 - 2 + j * 26, 19, C.dim, 'left', 'light');
 
-    var x0 = X0, x1 = X1, i;
-    // ---- Kopf: Titel, feine Linie mit blauem Akzent ---------------------
-    g.text('Iconix Sounds', x0, 58, 30, C.dim, 'left', 'light');
-    g.line(x0, 80, x1, 80, 1.5, C.edge);
-    g.line(x0, 80, x0 + 96, 80, 3, C.accent);
+    if (s.diag) { drawDiag(g, s); return; }
 
-    var cur = null;
+    // ---- rechts: aktiver Sound, große Profil-Knöpfe, Lautstärke ----------
+    var x0 = X0, x1 = X1, i, cur = null;
     for (i = 0; i < s.profiles.length; i++) if (s.profiles[i].id === s.profile) cur = s.profiles[i];
-    g.text(cur ? cur.name : '–', x0, 148, 54, s.enabled ? C.text : C.dim, 'left', 'light');
-    g.text(kindOf(cur), x1, 148, 22, C.faint, 'right', 'light');
+    g.text(cur ? cur.name : '–', x0, 50, 36, s.enabled ? C.text : C.dim, 'left', 'light');
+    g.text(kindOf(cur), x1, 50, 20, C.faint, 'right', 'light');
+    g.line(x0, 66, x1, 66, 1.5, C.edge);
+    g.line(x0, 66, x0 + 96, 66, 3, C.accent);
 
-    // ---- Profil-Kacheln (2 Reihen à 4) ---------------------------------
     for (i = 0; i < s.profiles.length; i++) {
       var c = chipRect(i), active = s.profiles[i].id === s.profile;
       if (active) {
         g.rrect(c.x, c.y, c.w, c.h, c.r, C.accent);
-        g.rect(c.x + 3, c.y + 2, c.w - 6, 2, C.hi); // Lichtkante oben
+        g.rect(c.x + 4, c.y + 2, c.w - 8, 2, C.hi); // Lichtkante oben
       } else tile(g, c.x, c.y, c.w, c.h, c.r, C.panel, C.edge);
-      g.text(s.profiles[i].name, c.x + c.w / 2, c.y + 33, 22, active ? '#ffffff' : '#b9c3cf', 'center', active ? false : 'light');
+      g.text(s.profiles[i].name, c.x + c.w / 2, c.y + c.h / 2 + 9, 26, active ? '#ffffff' : '#c3ccd7', 'center', active ? false : 'light');
     }
 
-    // ---- Lautstärke: [−] ——●—— [+] --------------------------------------
-    var vy = VY;
-    g.text('Lautstärke', x0, vy - 16, 24, C.dim, 'left', 'light');
-    g.text(s.enabled ? pct(s.volume) : 'Stumm', x1, vy - 16, 26, s.enabled ? C.text : C.warn, 'right', 'light');
-    tile(g, x0, vy, VB, VB, 6, C.panel, C.edge);
-    g.line(x0 + 18, vy + VB / 2, x0 + VB - 18, vy + VB / 2, 3, C.text);
-    tile(g, x1 - VB, vy, VB, VB, 6, C.panel, C.edge);
-    g.line(x1 - VB + 18, vy + VB / 2, x1 - 18, vy + VB / 2, 3, C.text);
-    g.line(x1 - VB / 2, vy + 18, x1 - VB / 2, vy + VB - 18, 3, C.text);
-    var bx = x0 + VB + 28, bw = x1 - x0 - 2 * (VB + 28), by = vy + VB / 2;
-    g.rrect(bx, by - 3, bw, 6, 3, C.track);
-    var v = Math.max(0, Math.min(1, s.volume / 1.5)), vx = bx + bw * v; // Regler bis 150 %
-    if (v > 0.01) g.rrect(bx, by - 3, vx - bx, 6, 3, s.enabled ? C.accent : C.faint);
-    g.rrect(vx - 11, by - 11, 22, 22, 11, s.enabled ? '#ffffff' : C.dim);
-
-    // ---- Last: dünne Leiste -------------------------------------------
-    var ly = 452;
-    g.text('Last', x0, ly + 6, 20, C.faint, 'left', 'light');
-    g.rrect(x0 + 64, ly - 2, x1 - x0 - 64, 4, 2, C.track);
-    var lw = (x1 - x0 - 64) * Math.max(0, Math.min(1, s.load || 0));
-    if (lw > 4) g.rrect(x0 + 64, ly - 2, lw, 4, 2, C.accent2);
-
-    // ---- Status und Markierungen --------------------------------------
-    var sy = 500;
-    var a = s.audio || { ok: false, text: 'Audio-Dienst nicht verbunden' };
-    g.rrect(x0, sy - 13, 12, 12, 6, a.ok ? C.ok : C.crit);
-    g.text(a.text.length > 66 ? a.text.slice(0, 65) + '…' : a.text, x0 + 24, sy - 2, 20, C.dim, 'left', 'light');
-    var tags = [];
-    if (s.demo) tags.push(['DEMO', C.warn]);
-    if (s.sport) tags.push(['SPORT', C.accent2]);
-    var tx = x1;
-    for (i = tags.length - 1; i >= 0; i--) {
-      var tw = tags[i][0].length * 13 + 26;
-      tx -= tw;
-      tile(g, tx, sy - 27, tw, 32, 16, C.bg, tags[i][1]);
-      g.text(tags[i][0], tx + tw / 2, sy - 4, 18, tags[i][1], 'center', true);
-      tx -= 10;
-    }
-    if (s.hint) g.text(s.hint, 300, 508, 20, C.faint, 'center', 'light');
+    // ---- Lautstärke: [−] ——●—— [+], Wert über dem Regler ------------------
+    var vy = VY, by = vy + VB / 2;
+    tile(g, x0, vy, VB, VB, 8, C.panel, C.edge);
+    g.line(x0 + 20, by, x0 + VB - 20, by, 3.5, C.text);
+    tile(g, x1 - VB, vy, VB, VB, 8, C.panel, C.edge);
+    g.line(x1 - VB + 20, by, x1 - 20, by, 3.5, C.text);
+    g.line(x1 - VB / 2, vy + 20, x1 - VB / 2, vy + VB - 20, 3.5, C.text);
+    var bx = x0 + VB + 28, bw = x1 - x0 - 2 * (VB + 28);
+    g.text('Lautstärke', bx, vy + 12, 20, C.dim, 'left', 'light');
+    g.text(s.enabled ? pct(s.volume) : 'Stumm', bx + bw, vy + 12, 22, s.enabled ? C.text : C.warn, 'right', 'light');
+    g.rrect(bx, by + 6, bw, 6, 3, C.track);
+    var v = Math.max(0, Math.min(1, s.volume)), vx = bx + bw * v;
+    if (v > 0.01) g.rrect(bx, by + 6, vx - bx, 6, 3, s.enabled ? C.accent : C.faint);
+    g.rrect(vx - 12, by - 3, 24, 24, 12, s.enabled ? '#ffffff' : C.dim);
   }
 
   // Drehzahlmesser wie im Kombiinstrument: Skala mit Strichen und Ziffern, roter Bereich, blauer Bogen
   function drawTacho(g, s) {
-    var cx = 300, cy = 268, r = 206;
+    var cx = TX, cy = TY, r = TR;
     var redline = s.redline || 4800, top = Math.ceil(redline * 1.1 / 1000) * 1000;
     var rpm = Math.max(0, s.rpm || 0), frac = Math.min(1, rpm / top), redFrom = redline / top;
     var span = A1 - A0, k, ang, cs, sn, major, red;
@@ -170,9 +179,9 @@
     for (k = 0; k <= top; k += 500) {
       ang = A0 + span * (k / top); cs = Math.cos(ang); sn = Math.sin(ang);
       major = k % 1000 === 0; red = k >= redline;
-      var r0 = r - (major ? 26 : 16), r1 = r - 6;
+      var r0 = r - (major ? 24 : 15), r1 = r - 6;
       g.line(cx + cs * r0, cy + sn * r0, cx + cs * r1, cy + sn * r1, major ? 3 : 2, red ? C.crit : (major ? '#c9d1db' : C.tick));
-      if (major) g.text(String(k / 1000), cx + cs * (r - 52), cy + sn * (r - 52) + 9, 26, red ? C.crit : C.dim, 'center', 'light');
+      if (major) g.text(String(k / 1000), cx + cs * (r - 46), cy + sn * (r - 46) + 8, 23, red ? C.crit : C.dim, 'center', 'light');
     }
     // Bogen bis zur aktuellen Drehzahl (blau, im roten Bereich rot) und schmale Nadel
     if (frac > 0.003) {
@@ -181,34 +190,33 @@
       if (frac > redFrom) g.arc(cx, cy, r + 9, 8, A0 + span * redFrom, A0 + span * frac, C.crit);
     }
     ang = A0 + span * frac; cs = Math.cos(ang); sn = Math.sin(ang);
-    g.line(cx + cs * (r - 70), cy + sn * (r - 70), cx + cs * (r + 10), cy + sn * (r + 10), 4, frac > redFrom ? C.crit : '#ffffff');
-    // Ziffern in der Mitte
-    g.text(String(Math.round(rpm)), cx, cy + 22, 92, C.text, 'center', 'light');
-    g.text('1/min', cx, cy + 62, 22, C.faint, 'center', 'light');
-    g.text(Math.round(s.speed || 0) + ' km/h', cx, cy + 178, 36, C.text, 'center', 'light');
+    g.line(cx + cs * (r - 30), cy + sn * (r - 30), cx + cs * (r + 10), cy + sn * (r + 10), 4, frac > redFrom ? C.crit : "#ffffff"); // kurz: verdeckt die Ziffern nicht
+    // Ziffern in der Mitte, Tempo unten in der Öffnung der Skala
+    g.text(String(Math.round(rpm)), cx, cy + 20, 78, C.text, 'center', 'light');
+    g.text('1/min', cx, cy + 54, 20, C.faint, 'center', 'light');
+    g.text(Math.round(s.speed || 0) + ' km/h', cx, cy + 150, 30, C.text, 'center', 'light');
   }
 
   // s.diag = { lines: [...], page: 0 }
   function drawDiag(g, s) {
     var d = s.diag, pages = Math.max(1, Math.ceil(d.lines.length / DIAG_LINES));
     var page = ((d.page || 0) % pages + pages) % pages;
-    tile(g, X0 - 20, 24, X1 - X0 + 40, 488, 8, C.panel, C.edge);
-    g.text('Audio-Diagnose', X0, 66, 28, C.text, 'left', 'light');
-    g.line(X0, 82, X1, 82, 1.5, C.edge);
-    g.line(X0, 82, X0 + 96, 82, 3, C.accent);
-    g.text('Seite ' + (page + 1) + '/' + pages, X1, 66, 20, C.dim, 'right', 'light');
+    tile(g, X0 - 20, 18, X1 - X0 + 40, 494, 8, C.panel, C.edge);
+    g.text('Audio-Diagnose', X0, 60, 28, C.text, 'left', 'light');
+    g.line(X0, 76, X1, 76, 1.5, C.edge);
+    g.line(X0, 76, X0 + 96, 76, 3, C.accent);
+    g.text('Seite ' + (page + 1) + '/' + pages, X1, 60, 20, C.dim, 'right', 'light');
     var ls = d.lines.slice(page * DIAG_LINES, page * DIAG_LINES + DIAG_LINES);
-    ls = ls.map(function (l) { return l.length > 76 ? l.slice(0, 75) + '…' : l; });
-    for (var i = 0; i < ls.length; i++) g.text(ls[i], X0, 114 + i * 28, 21, i === 0 && page === 0 ? C.text : C.dim, 'left', 'light');
+    ls = ls.map(function (l) { return l.length > 62 ? l.slice(0, 61) + '…' : l; });
+    for (var i = 0; i < ls.length; i++) g.text(ls[i], X0, 106 + i * 28, 19, i === 0 && page === 0 ? C.text : C.dim, 'left', 'light');
     var b = hitsDiag();
     tile(g, b[0].x, b[0].y, b[0].w, b[0].h, b[0].r, C.bg2, C.edge);
-    g.text('Geräte testen', b[0].x + b[0].w / 2, b[0].y + 33, 22, C.warn, 'center', 'light');
+    g.text('Geräte testen', b[0].x + b[0].w / 2, b[0].y + 32, 21, C.warn, 'center', 'light');
     tile(g, b[1].x, b[1].y, b[1].w, b[1].h, b[1].r, C.bg2, C.edge);
-    g.text('Weiter', b[1].x + b[1].w / 2, b[1].y + 33, 22, C.text, 'center', 'light');
+    g.text('Weiter', b[1].x + b[1].w / 2, b[1].y + 32, 21, C.text, 'center', 'light');
     g.rrect(b[2].x, b[2].y, b[2].w, b[2].h, b[2].r, C.accent);
-    g.text('Schließen', b[2].x + b[2].w / 2, b[2].y + 33, 22, '#ffffff', 'center', false);
-    if (s.audio && s.audio.text) g.text(s.audio.text.length > 60 ? s.audio.text.slice(0, 59) + '…' : s.audio.text, X0, 432, 20, s.audio.ok ? C.ok : C.warn, 'left', 'light');
+    g.text('Schließen', b[2].x + b[2].w / 2, b[2].y + 32, 21, '#ffffff', 'center', false);
   }
 
-  return { W: W, H: H, colors: C, draw: draw, hits: hits, hitsDiag: hitsDiag, hitAt: hitAt, DIAG_LINES: DIAG_LINES };
+  return { W: W, H: H, colors: C, draw: draw, hits: hits, hitsDiag: hitsDiag, hitAt: hitAt, DIAG_LINES: DIAG_LINES, X1_NARROW: X1_NARROW, X1_WIDE: X1_WIDE };
 });

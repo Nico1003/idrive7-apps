@@ -156,9 +156,9 @@ test('SmartX: Kanal auflösen, Format aus dem Namen, kein Rückfall auf andere G
   process.env.ICONIX_PYTHON = process.execPath; // irgendein vorhandenes Programm als "Python"
   const c = E.candidates({ device: 'plug:smartx:CarLifeMedia_CF_48_STEREO' });
   assert.strictEqual(c.length, 1);
-  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '40000', '2']);
+  assert.deepStrictEqual(c[0].argv.slice(1), ['play', 'plug:smartx:CarLifeMedia_CF_48_STEREO', '48000', '30000', '2']);
   const m = E.candidates({ device: 'plug:smartx:Media_Overlay_Converter_Source_CF_24_MONO' });
-  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '40000', '1']);
+  assert.deepStrictEqual(m[0].argv.slice(3), ['24000', '30000', '1']);
 });
 
 test('Umrechnung 48 -> 24 kHz: Tiefpass gegen Aliasing, tiefe Töne bleiben', () => {
@@ -216,14 +216,14 @@ test('alle Profile: kein NaN, kein Übersteuern, kaum Energie über 2 kHz (nicht
 
 test('Verbrenner: Grundton = Zündfrequenz der virtuellen Drehzahl (Profil-Abbildung)', () => {
   const s = new Synth(24000);
-  s.configure({ profile: 'six', carIdle: 800, carRedline: 4800 });
-  s._setProfile('six');
-  const p = Profiles.get('six');
+  s.configure({ profile: 'supra', carIdle: 800, carRedline: 4800 });
+  s._setProfile('supra');
+  const p = Profiles.get('supra');
   assert.strictEqual(s._virtualRpm(800), p.idleRpm);
   assert.strictEqual(s._virtualRpm(4800), p.maxRpm);
   assert.ok(p.maxRpm <= 6500, 'Drehzahlband nur leicht gestreckt');
   // Zündfrequenz eines Reihensechsers bei 3000 U/min = 150 Hz: dort deutlich mehr Energie als bei 1000 Hz
-  const r = drive('six', 24000, 1.2, () => ({ rpm: 800 + (3000 - 750) / (6000 - 750) * 4000, load: 0.8, speed: 80 }));
+  const r = drive('supra', 24000, 1.2, () => ({ rpm: 800 + (3000 - 800) / (6500 - 800) * 4000, load: 0.8, speed: 80 }));
   const x = r.out.subarray(4800);
   const at = (f) => { let re = 0, im = 0; for (let i = 0; i < x.length; i++) { const w = 2 * Math.PI * f * i / 24000; re += x[i] * Math.cos(w); im += x[i] * Math.sin(w); } return Math.hypot(re, im); };
   assert.ok(at(150) > 5 * at(1000), 'Zündfrequenz dominiert: ' + at(150).toFixed(1) + ' vs ' + at(1000).toFixed(1));
@@ -256,7 +256,7 @@ test('keine Knackser: niedrige Drehzahl unter Last, Schaltknicke, Gas weg (Spitz
   }
 });
 
-test('keine Patscher, keine Schubumluft, kein Mechanik-Klicken, kein Turbo- oder Ansaugrauschen', () => {
+test('keine Patscher, kein Mechanik-Klicken, kein Turbo- oder Ansaugrauschen (Zischen nur per bov)', () => {
   const src = fs.readFileSync(path.join(ROOT, 'tools/iconix-audiod/synth.js'), 'utf8');
   assert.ok(!/popRate|popHeat|fBov|mechEnv|turboGain|fTurbo|inGain|fHelm/.test(src));
   assert.ok(Profiles.list.every((p) => p.popRate === undefined && p.turbo === undefined && p.intake === undefined));
@@ -296,7 +296,7 @@ test('Dienst rendert für einen 24-kHz-Mono-Kanal halb so viele Frames mit 2 Byt
   assert.strictEqual(eng.status().wants, true);
 });
 
-test('Regelkreis mit Rückmeldung des Players: Vorlauf begrenzt (Start 120 ms), auch wenn der Kanal hängt', () => {
+test('Regelkreis mit Rückmeldung des Players: Vorlauf begrenzt (Start 100 ms), auch wenn der Kanal hängt', () => {
   const eng = new E.Engine({ log() {} });
   let bytes = 0;
   eng.out = { child: {}, blocked: false, fmt: { rate: 24000, ch: 1 }, step: E.Output.prototype.step, list: [], opts: { device: 'x' },
@@ -313,7 +313,7 @@ test('Regelkreis mit Rückmeldung des Players: Vorlauf begrenzt (Start 120 ms), 
 });
 
 test('Lautstärke: sanftere Kurve und Kompressor heben Konstantfahrt an, Vollgas übersteuert nicht', () => {
-  const lvl = (vol, load) => { const s = new Synth(24000); s.configure({ profile: 'subtle', volume: vol, enabled: true }); s._setProfile('subtle');
+  const lvl = (vol, load) => { const s = new Synth(24000); s.configure({ profile: 'turbo4', volume: vol, enabled: true }); s._setProfile('turbo4');
     const f = new Float32Array(4800); let pk = 0, sum = 0, n = 0;
     for (let k = 0; k < 60; k++) { s.setParams({ rpm: 2200, load, speed: 80 }); s.render(f, 2400); if (k > 30) for (let i = 0; i < 4800; i += 2) { const v = Math.abs(f[i]); pk = Math.max(pk, v); sum += v * v; n++; } }
     return { pk, rms: Math.sqrt(sum / n) }; };
@@ -348,7 +348,7 @@ test('Autostart: App hat einen Hintergrund-Einstieg (background) und app.json au
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/app.json'), 'utf8')).autostart, true);
 });
 
-test('Vorlauf: Start 120 ms, Aussetzer +30 ms, ruhig wieder knapper bis 70 ms', () => {
+test('Vorlauf: Start 100 ms, Aussetzer +30 ms, ruhig wieder knapper bis 50 ms', () => {
   const eng = new E.Engine({ log() {} });
   eng.out = { child: {}, blocked: false, fmt: { rate: 24000, ch: 1 }, step: E.Output.prototype.step, list: [], opts: { device: 'x' },
     played: 0, underruns: 0, write() { return true; }, start() { return true; }, stop() {} };
@@ -361,7 +361,7 @@ test('Vorlauf: Start 120 ms, Aussetzer +30 ms, ruhig wieder knapper bis 70 ms', 
     assert.strictEqual(eng.fbLead, E.FB_LEAD_START);
     eng.out.underruns = 1; eng.lastParams = t; eng._tick();
     assert.strictEqual(eng.fbLead, E.FB_LEAD_START + 30);
-    for (let i = 0; i < 40; i++) { t += 21000; eng.lastParams = t; eng._tick(); }
+    for (let i = 0; i < 40; i++) { t += 11000; eng.lastParams = t; eng._tick(); }
     assert.strictEqual(eng.fbLead, E.FB_LEAD_MS);
   } finally { Date.now = realNow; }
 });
@@ -372,7 +372,7 @@ test('Player: Stille-Schutz gegen Leerlaufen und Stille zu Beginn (alsa_play.py)
   assert.ok(/os\.write\(1, \('P %d/.test(py), 'Rückmeldung der gespielten Frames');
 });
 
-test('Absenken: verbundene Telefon-/Navi-Quelle senkt ab, Musik nicht, wieder laut wenn weg', async () => {
+test('Absenken: Telefon senkt ab, Navigation und Musik nicht, wieder laut wenn weg', async () => {
   const sources = [{ sourceID: 1048, name: 'OAPGenericOverlay' }, { sourceID: 10, name: 'Tuner_FM' }, { sourceID: 40, name: 'TEL_HandsFree' },
     { sourceID: 41, name: 'Navigation_Prompt' }, { sourceID: 12, name: 'USB_Media' }];
   const { am, signals } = fakeAm({ sources, conns: [{ mainConnectionID: 3, sourceID: 10, sinkID: 1024, connectionState: 2 }] });
@@ -385,17 +385,18 @@ test('Absenken: verbundene Telefon-/Navi-Quelle senkt ab, Musik nicht, wieder la
   assert.strictEqual(r.ducked, true);
   assert.ok(/TEL_HandsFree/.test(r.duckBy));
   am.conns = am.conns.filter((c) => c.sourceID !== 40);
-  am.conns.push({ mainConnectionID: 5, sourceID: 41, sinkID: 1, connectionState: 4 }); // getrennt: zählt nicht
+  am.conns.push({ mainConnectionID: 5, sourceID: 41, sinkID: 1, connectionState: 2 }); // Navi-Ansage: Ton bleibt
   await r._pollDuck();
-  assert.strictEqual(r.ducked, false);
+  assert.strictEqual(r.ducked, false, 'Navigation darf nicht absenken');
   r.setDuck(false); am.conns.push({ mainConnectionID: 6, sourceID: 40, sinkID: 1, connectionState: 2 });
   r.lastDuck = 0; await r._step();
   assert.strictEqual(r.ducked, false, 'Einstellung aus: nie absenken');
   assert.ok(CarRoute.duckName('Phone') && CarRoute.duckName('PDC_Warning') && !CarRoute.duckName('CarLifeMedia') && !CarRoute.duckName('Radio_DAB'));
+  assert.ok(!CarRoute.duckName('Navigation_Prompt') && !CarRoute.duckName('NaviGuidance') && !CarRoute.duckName('TTS') && !CarRoute.duckName('TrafficAnnouncement'));
 });
 
 test('Absenken im Klang: rund -12 dB', () => {
-  const run = (duck) => { const s = new Synth(24000); s.configure({ profile: 'six', volume: 0.8, enabled: true, duck }); s._setProfile('six');
+  const run = (duck) => { const s = new Synth(24000); s.configure({ profile: 'supra', volume: 0.8, enabled: true, duck }); s._setProfile('supra');
     const f = new Float32Array(4800); let sum = 0, n = 0;
     for (let k = 0; k < 50; k++) { s.setParams({ rpm: 2500, load: 0.4, speed: 80 }); s.render(f, 2400); if (k > 25) for (let i = 0; i < 4800; i += 2) { sum += f[i] * f[i]; n++; } }
     return Math.sqrt(sum / n); };
@@ -411,6 +412,119 @@ test('Einstellungen: Telefon/Ansagen-Option, Experten- und Motor-Gruppe, Gerät 
   assert.deepStrictEqual(by.alsaDevice.when, { route: 'alsa' });
   assert.strictEqual(by.carRedline.group, 'Motor anpassen');
   assert.ok(!by.dialVolume);
+});
+
+test('Profile: Turbo-Auswahl (Standard Turbo Vierzylinder), kein Sechser/Dezent/Elektro mehr', () => {
+  assert.strictEqual(Profiles.DEFAULT, 'turbo4');
+  assert.deepStrictEqual(Profiles.ids, ['turbo4', 'turbo4s', 'supra', 'turbo5', 'boxer', 'v8', 'v10']);
+  assert.strictEqual(Profiles.get('subtle').id, 'turbo4', 'alte gespeicherte Auswahl fällt auf den Standard zurück');
+  assert.ok(Profiles.list.every((p) => p.kind === 'combustion' && p.desc));
+  const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/app.json'), 'utf8'));
+  const opt = j.settings.find((x) => x.key === 'profile');
+  assert.deepStrictEqual(opt.options.map((o) => o[0]), Profiles.ids);
+  assert.strictEqual(opt.default, 'turbo4');
+  assert.strictEqual(j.title, 'Sound Drive');
+});
+
+test('Supra: Zischen beim Gaswegnehmen nach Ladedruck, nicht bei Konstantfahrt', () => {
+  const p = Profiles.get('supra');
+  const run = (fn) => { const b = p.bov; const a = drive('supra', 24000, 5, fn).out; p.bov = 0; const c = drive('supra', 24000, 5, fn).out; p.bov = b;
+    let e = 0; for (let i = 24000 * 3; i < 24000 * 3.4; i++) e += (a[i] - c[i]) * (a[i] - c[i]); return Math.sqrt(e / (24000 * 0.4)); };
+  const lift = run((t) => t < 3 ? { rpm: 2000 + 1500 * t / 3, load: 1, speed: 80 } : { rpm: 3500 - 400 * (t - 3), load: 0, overrun: true, speed: 80 });
+  const steady = run(() => ({ rpm: 2500, load: 0.3, speed: 80 }));
+  assert.ok(lift > 0.03, 'Zischen hörbar: ' + lift.toFixed(3));
+  assert.ok(steady < 0.002, 'kein Zischen bei Konstantfahrt: ' + steady.toFixed(4));
+});
+
+test('Bei hoher Drehzahl lauter als bei niedriger (gleiche Last)', () => {
+  const rms = (a) => Math.sqrt(a.reduce((x, v) => x + v * v, 0) / a.length);
+  const lo = rms(drive('turbo4', 24000, 2, () => ({ rpm: 1600, load: 0.3, speed: 60 })).out.subarray(24000));
+  const hi = rms(drive('turbo4', 24000, 2, () => ({ rpm: 4200, load: 0.3, speed: 60 })).out.subarray(24000));
+  assert.ok(hi > lo * 1.25, 'hoch ' + hi.toFixed(3) + ' vs niedrig ' + lo.toFixed(3));
+});
+
+test('Drehrad bleibt beim Auto: Kit hält den Controller nicht (MGU_NO_GRAB), App greift nicht zu', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/main.js'), 'utf8');
+  assert.ok(/^process\.env\.MGU_NO_GRAB = '1';/m.test(src));
+  assert.ok(!/controller\.grab\(true\)|controller\.onInput\(/.test(src));
+});
+
+test('Oberfläche: alles Bedienbare links von x = 1140 (geteilte Ansicht verdeckt rechts)', () => {
+  const UI = require(path.join(ROOT, 'apps/iconix_sounds/ui.js'));
+  const all = UI.hits(Profiles.list).concat(UI.hitsDiag());
+  all.forEach((h) => assert.ok(h.x + h.w <= 1140, h.key + ' reicht bis ' + (h.x + h.w)));
+});
+
+test('Oberfläche: Profil-Knöpfe zwei je Reihe und groß genug für die Fahrt', () => {
+  const UI = require(path.join(ROOT, 'apps/iconix_sounds/ui.js'));
+  const chips = UI.hits(Profiles.list).filter((h) => h.act === 'profile');
+  assert.strictEqual(new Set(chips.slice(0, 2).map((c) => c.y)).size, 1, 'erste Reihe: zwei Knöpfe');
+  assert.ok(chips[2].y > chips[0].y, 'dritter Knopf in der nächsten Reihe');
+  chips.forEach((c) => assert.ok(c.w >= 300 && c.h >= 60, c.key + ' ' + c.w + 'x' + c.h));
+  UI.hits(Profiles.list).filter((h) => h.act === 'vol').forEach((h) => assert.ok(h.w >= 60 && h.h >= 60));
+});
+
+test('Lautstärke: 100 % klingt wie früher 150 %', () => {
+  const run = (vol) => { const s = new Synth(24000); s.configure({ profile: 'turbo4', volume: vol, enabled: true }); s._setProfile('turbo4');
+    const f = new Float32Array(4800); let sum = 0, n = 0;
+    for (let k = 0; k < 50; k++) { s.setParams({ rpm: 2200, load: 0.15, speed: 80 }); s.render(f, 2400); if (k > 25) for (let i = 0; i < 4800; i += 2) { sum += f[i] * f[i]; n++; } }
+    return Math.sqrt(sum / n); };
+  const v100 = run(1), v66 = run(2 / 3);
+  assert.ok(Math.abs(20 * Math.log10(v100 / v66)) > 1.5, 'über 66 % (= früher 100 %) noch lauter');
+  assert.ok(v66 > 0.05, 'früher 100 % jetzt bei 66 %: ' + v66.toFixed(3));
+});
+
+test('Fahrmodus: Schalter-Werte werden erkannt, Eco leiser und dumpfer, Sport lauter und offener', () => {
+  const VehicleFeed = require(path.join(ROOT, 'apps/iconix_sounds/vehicle_feed.js'));
+  const M = VehicleFeed.driveModeOf;
+  assert.strictEqual(M(2), 'sport'); assert.strictEqual(M(28), 'sport'); assert.strictEqual(M(8), 'eco'); assert.strictEqual(M(5), 'comfort');
+  assert.strictEqual(M(10), 'comfort'); assert.strictEqual(M(19), 'comfort'); assert.strictEqual(M('SPORT_PLUS'), 'sportplus');
+  assert.strictEqual(M('ECO_PRO'), 'eco'); assert.strictEqual(M(''), null); assert.strictEqual(M(undefined), null);
+  const run = (mode) => { const s = new Synth(24000); s.configure({ profile: 'turbo4', volume: 0.8, enabled: true, mode }); s._setProfile('turbo4');
+    const f = new Float32Array(480); let sum = 0, n = 0;
+    for (let k = 0; k < 400; k++) { s.setParams({ rpm: 2500, load: 0.4, speed: 80 }); s.render(f, 240); if (k > 250) for (let i = 0; i < 480; i += 2) { sum += f[i] * f[i]; n++; } }
+    return Math.sqrt(sum / n); };
+  const eco = run('eco'), com = run('comfort'), sp = run('sport'), none = run(null);
+  assert.ok(eco < com * 0.8, 'Eco leiser: ' + eco.toFixed(3) + ' vs ' + com.toFixed(3));
+  assert.ok(sp > com * 1.12, 'Sport lauter: ' + sp.toFixed(3) + ' vs ' + com.toFixed(3));
+  assert.ok(Math.abs(none - com) < 1e-6, 'ohne Fahrmodus wie Comfort');
+});
+
+test('Fahrmodus-Wechsel mitten im Ton: weich, ohne Knacken', () => {
+  const s = new Synth(24000); s.configure({ profile: 'supra', volume: 1, enabled: true, mode: 'eco' }); s._setProfile('supra');
+  const f = new Float32Array(480), out = [];
+  for (let k = 0; k < 300; k++) { if (k === 150) s.configure({ mode: 'sportplus' }); s.setParams({ rpm: 3000, load: 0.6, speed: 90 }); s.render(f, 240); for (let i = 0; i < 480; i += 2) out.push(f[i]); }
+  let maxStep = 0; for (let i = 24000 * 1.4; i < 24000 * 1.7; i++) maxStep = Math.max(maxStep, Math.abs(out[i] - out[i - 1]));
+  let ref = 0; for (let i = 24000 * 1.0; i < 24000 * 1.3; i++) ref = Math.max(ref, Math.abs(out[i] - out[i - 1]));
+  assert.ok(maxStep < ref * 2.5, 'Sprung ' + maxStep.toFixed(3) + ' vs vorher ' + ref.toFixed(3));
+});
+
+test('Breite Ansicht: Knöpfe nutzen die ganze Breite, schmale bleibt links von 1140', () => {
+  const UI = require(path.join(ROOT, 'apps/iconix_sounds/ui.js'));
+  const wide = UI.hits(Profiles.list, true), narrow = UI.hits(Profiles.list, false);
+  assert.ok(Math.max(...wide.map((h) => h.x + h.w)) > 1500 && Math.max(...wide.map((h) => h.x + h.w)) <= 1588);
+  assert.ok(Math.max(...narrow.map((h) => h.x + h.w)) <= 1140);
+  assert.ok(UI.hitAt(Profiles.list, 1500, 110, false, true), 'Tippen rechts trifft in breiter Ansicht');
+  assert.ok(!UI.hitAt(Profiles.list, 1500, 110, false, false), 'in schmaler Ansicht nicht');
+});
+
+test('Oberfläche in allen Zuständen: nichts ragt über den Rand, keine leeren Texte', () => {
+  const UI = require(path.join(ROOT, 'apps/iconix_sounds/ui.js'));
+  const long = 'Overlay-Mix: verbunden · leiser (Telefon/PDC) · SmartX · 24 kHz · spielt · 12 Aussetzer';
+  const states = [];
+  for (const wide of [false, true]) for (const mode of [null, 'eco', 'sport', 'sportplus']) for (const enabled of [true, false])
+    for (const diag of [null, { lines: Array.from({ length: 30 }, (_, i) => 'Zeile ' + i + ' ' + 'x'.repeat(90)), page: 1 }])
+      states.push({ profiles: Profiles.list, profile: 'turbo5', rpm: 7000, redline: 4800, speed: 250, volume: 1, enabled, sport: true, demo: true, mode, wide, diag, audio: { ok: false, text: long } });
+  for (const st of states) {
+    const limit = st.wide ? 1600 : 1140;
+    const g = { rect() {}, rrect() {}, line() {}, arc() {}, text(t, x, y, size, col, align) {
+      assert.ok(t !== undefined && t !== null && String(t) !== 'undefined', 'Text undefined');
+      const w = String(t).length * size * 0.5, x0 = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
+      assert.ok(x0 >= 0 && x0 + w <= limit + 4, 'Text ragt hinaus: ' + JSON.stringify(String(t).slice(0, 40)) + ' bis ' + Math.round(x0 + w) + ' (Grenze ' + limit + ')');
+      assert.ok(y > 0 && y <= 520, 'Text außerhalb der Höhe: ' + t);
+    } };
+    UI.draw(g, st);
+  }
 });
 
 (async () => {

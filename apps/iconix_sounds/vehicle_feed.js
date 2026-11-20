@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Iconix Sounds – Fahrzeugdaten über SOME/IP (ctx.signals des idrive7-apps-Kits)
+ * Sound Drive – Fahrzeugdaten über SOME/IP (ctx.signals des idrive7-apps-Kits)
  *
  * Signale und Skalierung laut idrive7-apps (live_data/signals.js, README Abschnitt 7):
  *   Drehzahl  CDS.statusEngineSpeed2.actualValueRPMEngineCrankshaft      * 0.25      (65535 = ungültig)
@@ -21,6 +21,9 @@ const IF = {
   PEDAL: 'de.bmw.powertrain.AcceleratorPedal'
 };
 const FRESH_MS = 1500;
+// Vorhersage: die Drehzahl um so viel voraus schätzen (Steigung der letzten ~250 ms), wie Ton im Puffer steht –
+// so wirkt der Sound weniger verzögert. Begrenzt, damit Schaltknicke nicht überschießen.
+const PREDICT_S = 0.04, PREDICT_MAX = 250;
 
 function pick(v, member) {
   if (typeof v === 'number') return v;
@@ -28,6 +31,21 @@ function pick(v, member) {
   return null;
 }
 function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+
+/**
+ * Fahrerlebnisschalter (FES.statusFESVehicleDynamicSwitchHMI.actualValueModeDrivingExperience) -> Fahrmodus.
+ * Zahlen wie im Kit-Projekt (apps/redline/hud.js): 1-3, 15, 16, 23, 28 Sport/Boost; 4-6, 10 Comfort/Adaptiv;
+ * 7-9 Eco Pro; 17-22 Hybrid/Elektro (wie Comfort). Texte: SPORT_PLUS -> sportplus.
+ */
+function driveModeOf(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  if (!isNaN(n)) return (n >= 1 && n <= 3) || n === 15 || n === 16 || n === 23 || n === 28 ? 'sport'
+    : (n >= 7 && n <= 9) ? 'eco' : (n >= 4 && n <= 6) || n === 10 || (n >= 17 && n <= 22) ? 'comfort' : null;
+  const w = String(raw).toUpperCase();
+  return /SPORT.?PLUS|SPORT\+|BOOST/.test(w) ? 'sportplus' : /SPORT/.test(w) ? 'sport' : /ECO/.test(w) ? 'eco'
+    : /COMFORT|ADAPTIV|HYBRID|ELECTRIC|TRAFFIC/.test(w) ? 'comfort' : null;
+}
 
 class VehicleFeed extends EventEmitter {
   /**
@@ -45,6 +63,7 @@ class VehicleFeed extends EventEmitter {
     this.load = 0;
     this.watches = [];
     this.logged = {};
+    this.mode = null;
   }
 
   start() {
@@ -70,6 +89,12 @@ class VehicleFeed extends EventEmitter {
       }
     });
     this._watch(IF.FES, {
+      statusFESVehicleDynamicSwitchHMI: v => {
+        const raw = v && typeof v === 'object' ? v.actualValueModeDrivingExperience : v;
+        this._first('mode', v);
+        const m = driveModeOf(raw);
+        if (m && m !== this.mode) { this.mode = m; this.emit('mode', m); }
+      },
       statusActualValueTorque2: v => {
         const raw = pick(v, 'actualValueTorqueCrankshaft');
         this._first('torque', v);
@@ -152,8 +177,9 @@ class VehicleFeed extends EventEmitter {
     // leicht glätten, damit Lastsprünge nicht knacken (steigend schneller als fallend)
     this.load += (load - this.load) * (load > this.load ? 0.6 : 0.4);
 
+    const ahead = clamp(slope * PREDICT_S, -PREDICT_MAX, PREDICT_MAX);
     this.emit('sample', {
-      rpm: rpm,
+      rpm: Math.max(0, rpm + ahead),
       load: this.load,
       speed: this.fresh('speed') ? this.v.speed : 0,
       overrun: overrun,
@@ -165,3 +191,4 @@ class VehicleFeed extends EventEmitter {
 
 module.exports = VehicleFeed;
 module.exports.IF = IF;
+module.exports.driveModeOf = driveModeOf;

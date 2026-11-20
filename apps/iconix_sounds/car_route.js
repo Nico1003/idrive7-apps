@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Iconix Sounds – Tonweg zu den Fahrzeuglautsprechern über den BMW-Audiomanager (GENIVI AM)
+ * Sound Drive – Tonweg zu den Fahrzeuglautsprechern über den BMW-Audiomanager (GENIVI AM)
  *
  * Ton, der in einen SmartX-Kanal geschrieben wird (ALSA "plug:smartx:<Kanal>"), ist erst hörbar, wenn der
  * Audiomanager die passende Quelle mit einer Lautsprecher-Senke verbindet. Diese Verbindung fordert die App
@@ -42,10 +42,11 @@ const ROUTES = {
   alsa:        { label: 'ALSA direkt', source: null, sink: null, mark: false, device: null }
 };
 const DEFAULT_ROUTE = 'overlay';
-// Absenken (Ducking): solange eine dieser Quellen verbunden ist, wird der Motorsound leiser.
+// Absenken (Ducking): solange eine dieser Quellen verbunden ist, wird der Motorsound leiser – Telefon,
+// Sprachassistent, Parkpiepser, Warngongs. Navigation und Verkehrsdurchsagen bewusst NICHT (Ton bleibt).
 // Namen aus dem Audiomanager (getListMainSources); Musikquellen zählen nicht.
-const DUCK_RE = /phone|tel|call|hfp|handsfree|voice|speech|tts|prompt|navi|guidance|announce|traffic|pdc|park|chime|gong|warn|alert|signal|siri|assist|sds|ecall|bcall/i;
-const NO_DUCK_RE = /media|radio|tuner|usb|a2dp|music|audio_stream|carlife|overlay|iconix/i;
+const DUCK_RE = /phone|tel|call|hfp|handsfree|siri|assist|sds|pdc|park|chime|gong|warn|alert|ecall|bcall/i;
+const NO_DUCK_RE = /media|radio|tuner|usb|a2dp|music|audio_stream|carlife|overlay|iconix|navi|guidance|tts|prompt|announce|traffic/i;
 const DUCK_POLL_MS = 1500;
 const CS = ['CS_UNKNOWN', 'CS_CONNECTING', 'CS_CONNECTED', 'CS_DISCONNECTING', 'CS_DISCONNECTED', 'CS_SUSPENDED'];
 
@@ -152,7 +153,7 @@ class CarRoute {
     let s = r.label + ': ' + this.state;
     if (this.state === 'verbunden' && this.connState && this.connState !== 'CS_CONNECTED') s += ' (' + this.connState + ')';
     if (this.lastError && this.state !== 'verbunden') s += ' – ' + this.lastError;
-    if (this.ducked) s += ' · leiser (Telefon/Ansage)';
+    if (this.ducked) s += ' · leiser (Telefon/PDC)';
     return s;
   }
 
@@ -317,7 +318,7 @@ class CarRoute {
     const out = ['--- Tonweg (Audiomanager) ---', 'Weg: ' + r.label + (r.source != null ? ' · Quelle ' + r.source + ' -> Senke ' + r.sink : '') +
       (r.device ? ' · Kanal ' + r.device.replace(/^smartx:/, '') : '')];
     out.push('Status: ' + this.short() + (this.conn ? ' · ID ' + this.conn.id : ''));
-    out.push('Absenken: ' + (!this.duckOn ? 'aus' : this.ducked ? 'aktiv wegen ' + this.duckBy : 'bereit (Telefon, Navi, PDC ...)'));
+    out.push('Absenken: ' + (!this.duckOn ? 'aus' : this.ducked ? 'aktiv wegen ' + this.duckBy : 'bereit (Telefon, PDC, Gong – nicht bei Navigation)'));
     if (!(await this._proxies())) { out.push(this.proxyErr); return out; }
     const fmt = (a, idKey) => a.map(function (x) { return x[idKey] + ' ' + (x.name || ''); }).join(', ');
     try {

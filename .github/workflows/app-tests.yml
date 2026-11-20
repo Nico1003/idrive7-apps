@@ -26,13 +26,17 @@ jobs:
           python-version: '3.12'   # wie mgu-python auf dem Head Unit
       - name: Python-Dateien kompilieren (Tippfehler = kein Ton im Auto)
         run: python3 -m py_compile tools/iconix-audiod/alsa_play.py kit/tools/build.py
-      - name: App-Kopien von Synth und Engine entsprechen dem Tool
+      - name: App-Kopien von Synth, Engine und Profilen entsprechen dem Tool
         run: |
-          for f in synth.js engine.js; do cmp tools/iconix-audiod/$f apps/iconix_sounds/$f; done
+          for f in synth.js engine.js profiles.js; do cmp tools/iconix-audiod/$f apps/iconix_sounds/$f; done
       - run: node kit/tools/test_runtime.js
       - run: node kit/tools/test_drive_coach.js
       - run: node kit/tools/test_iconix_route.js
       - run: python3 kit/tools/test_alsa_play.py
+      - name: Ende-zu-Ende (Dienst + Player als Kindprozess)
+        run: ICONIX_PYTHON=python3 node kit/tools/test_engine_e2e.js
+      - name: Belastungstest Klang (alle Profile, Fahrmodi, Lautstärken, Fahrsituationen)
+        run: node kit/tools/iconix_soak.js
       - name: Knackser-Suche
         run: |
           node kit/tools/iconix_popscan.js | tee popscan.txt

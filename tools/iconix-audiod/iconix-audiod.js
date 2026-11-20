@@ -1,6 +1,6 @@
 'use strict';
 /*
- * iconix-audiod – Audio-Dienst für Iconix Sounds (EXPERIMENTELL)
+ * iconix-audiod – Audio-Dienst für Sound Drive (EXPERIMENTELL)
  *
  * Läuft als systemd-Dienst (Root-Tool des mgu-store) auf dem Head Unit mit dessen Node 8.
  * Empfängt von der App über Unix-Sockets Drehzahl/Last/Tempo und Einstellungen und gibt den Sound
@@ -31,7 +31,7 @@ const Synth = require('./synth');
 const Profiles = require('./profiles');
 const E = require('./engine');
 
-const VERSION = '0.9.5';
+const VERSION = '0.9.8';
 const SOCKETS = process.env.ICONIX_AUDIOD_SOCKET
   ? [process.env.ICONIX_AUDIOD_SOCKET]
   : ['/run/iconix-audiod/audiod.sock', '/tmp/iconix-audiod.sock'];

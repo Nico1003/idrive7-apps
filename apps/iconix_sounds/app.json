@@ -1,15 +1,15 @@
 {
   "id": "iconix_sounds",
-  "title": "Iconix Sounds",
-  "description": "Virtuelle Motor- und Elektro-Sounds abhängig von Drehzahl, Last und Geschwindigkeit, mit Profilen und Lautstärkeregelung. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), Tonweg zum Testen wählbar. Braucht das Tool Iconix Audio.",
-  "version": "0.9.5",
+  "title": "Sound Drive",
+  "description": "Virtueller Motorsound abhängig von Drehzahl und Last: Turbo-Vierzylinder, Supra-Turbo mit Zischen, Fünfzylinder, Boxer, V8 und V10. Ton über die Fahrzeuglautsprecher (Audiomanager + SmartX), startet mit dem Auto. Braucht das Tool Sound Drive Audio.",
+  "version": "0.9.8",
   "vendor": "custom",
   "loggingId": "ICXS",
   "iconGlyph": "engine",
   "mguHmi": ["ID7", "ID8"],
   "autostart": true,
   "requires": {
-    "iconix-audiod": "0.9.5"
+    "iconix-audiod": "0.9.8"
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -20,7 +20,8 @@
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusActualValueTorque2": "s",
-      "_optional": "Motormoment als Lastquelle (ohne: Gaspedal oder Drehzahlanstieg)"
+      "statusFESVehicleDynamicSwitchHMI": "s",
+      "_optional": "Motormoment als Lastquelle und Fahrmodus (ohne: Gaspedal oder Drehzahlanstieg, Sound wie Comfort)"
     },
     "de.bmw.powertrain.AcceleratorPedal": {
       "AngleAcceleratorPedal": "s",
@@ -49,7 +50,7 @@
     {
       "name": "MAIN",
       "kind": "canvas",
-      "title": "Iconix Sounds",
+      "title": "Sound Drive",
       "buttons": [
         ["BTN_PROFILE", "Sound wechseln"],
         ["BTN_MUTE", "Stumm / Ton an"],
@@ -70,15 +71,15 @@
       "key": "profile",
       "label": "Sound-Profil",
       "type": "choice",
-      "default": "subtle",
+      "default": "turbo4",
       "options": [
-        ["six", "Reihensechser Sport"],
-        ["v8", "V8 Bariton"],
-        ["subtle", "Sport Dezent"],
         ["turbo4", "Turbo Vierzylinder"],
-        ["v10", "Racing V10"],
-        ["edrive", "Electric Drive"],
-        ["espace", "Electric Space"]
+        ["turbo4s", "Turbo Vier Sport"],
+        ["supra", "Supra Turbo"],
+        ["turbo5", "Turbo Fuenfzylinder"],
+        ["boxer", "Turbo Boxer"],
+        ["v8", "V8 Bariton"],
+        ["v10", "Racing V10"]
       ]
     },
     {
@@ -107,17 +108,7 @@
         [85, "85 %"],
         [90, "90 %"],
         [95, "95 %"],
-        [100, "100 %"],
-        [105, "105 % (Boost)"],
-        [110, "110 % (Boost)"],
-        [115, "115 % (Boost)"],
-        [120, "120 % (Boost)"],
-        [125, "125 % (Boost)"],
-        [130, "130 % (Boost)"],
-        [135, "135 % (Boost)"],
-        [140, "140 % (Boost)"],
-        [145, "145 % (Boost)"],
-        [150, "150 % (Boost)"]
+        [100, "100 %"]
       ]
     },
     {
@@ -150,6 +141,18 @@
       "label": "Bei Telefon/Ansagen leiser",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "followMode",
+      "label": "Sound folgt dem Fahrmodus (Eco dezent, Sport aggressiv)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "wide",
+      "label": "Breite Ansicht (ohne Seitenfenster)",
+      "type": "bool",
+      "default": false
     },
     {
       "key": "maxTorque",

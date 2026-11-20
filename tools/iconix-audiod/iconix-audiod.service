@@ -1,7 +1,7 @@
-# Iconix Sounds audio service, installed from the Store (tools/iconix-audiod/component.json).
+# Sound Drive audio service, installed from the Store (tools/iconix-audiod/component.json).
 # Aufbau wie idrive7-renderd.service (kit/renderd/prebuilt) aus idrive7-apps.
 [Unit]
-Description=Iconix Sounds audio service (experimental)
+Description=Sound Drive audio service (experimental)
 After=oapcontroller.service
 RequiresMountsFor=/var/opt
 StartLimitIntervalSec=0

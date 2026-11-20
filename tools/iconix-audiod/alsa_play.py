@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Iconix Sounds – ALSA-Wiedergabe ohne aplay: Python + ctypes direkt gegen libasound.so.2.
+Sound Drive – ALSA-Wiedergabe ohne aplay: Python + ctypes direkt gegen libasound.so.2.
 
 Das Head Unit hat libasound und Python 3.12 (mgu-python), aber kein aplay. Dieses Skript ersetzt aplay:
 
@@ -207,6 +207,7 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
     zeros = bytes(fill_n * frame_bytes)
     fd = stdin.fileno()
     fills = 0
+    stalled = False
     try:
         import select
     except ImportError:
@@ -231,10 +232,13 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
                         w = lib.snd_pcm_writei(h, zeros, fill_n)
                         if w > 0:
                             total += w
-                            fills += 1
-                            if fills <= 5 or fills % 100 == 0:
+                            # je Stocken EINE Meldung (beim ersten Nachlegen), damit der Dienst jedes Mal
+                            # mitzählt und seinen Vorlauf vergrößert – auch nach vielen Aussetzern
+                            if not stalled:
+                                fills += 1
                                 sys.stderr.write('underrun!!! (Stille nachgelegt, #%d)\n' % fills)
                                 sys.stderr.flush()
+                            stalled = True
                             report()
                         elif w < 0:
                             lib.snd_pcm_recover(h, int(w), 1)
@@ -246,6 +250,7 @@ def cmd_play(dev, rate, latency_us=200000, channels=2):
                 data = stdin.read1(chunk) if hasattr(stdin, 'read1') else stdin.read(chunk)
             if not data:
                 break
+            stalled = False
             data = pending + data
             n = len(data) // frame_bytes
             pending = data[n * frame_bytes:]
