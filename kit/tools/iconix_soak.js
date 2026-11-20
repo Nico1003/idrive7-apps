@@ -4,7 +4,8 @@
  *
  *   node kit/tools/iconix_soak.js [--quick]
  *
- * Für jedes Profil × Fahrmodus (ohne, Eco, Comfort, Sport, Sport+) × Lautstärke (0, 30, 80, 100 %) fährt der
+ * Für jedes Profil × Fahrmodus (ohne, Eco, Comfort, Sport, Sport+) × Lautstärke (0, 30, 80, 100 %) × Klang (Standard,
+ * maximal, minimal: Bass, Bellen, Zischen, Tempo-Lautstärke, Startsound) fährt der
  * Synth eine lange, gemischte Fahrt: Kaltstart aus 0 U/min, Leerlauf, Anfahren mit Hochschalten, Kickdown,
  * Gaswegnehmen bei hoher Drehzahl (Zischen), Schub, Runterschalten mit Zwischengas, Konstantfahrt, Stopp,
  * Abwürgen (0 U/min), Datenlücke, Profilwechsel und Fahrmodus-Wechsel mitten im Ton, Stumm/Ton an,
@@ -22,6 +23,12 @@ const SR = 24000, BLK = 240;              // 10-ms-Blöcke wie der Dienst
 const quick = process.argv.indexOf('--quick') >= 0;
 const MODES = quick ? [null, 'sport'] : [null, 'eco', 'comfort', 'sport', 'sportplus'];
 const VOLS = quick ? [0, 1] : [0, 0.3, 0.8, 1];
+// Klang-Einstellungen: Standard und beide Extreme (Bass, Bellen, Zischen, Tempo-Lautstärke, Startsound)
+const TONES = [
+  ['Standard', {}],
+  ['Klang maximal', { bassDb: 6, barkPct: 1.5, hissPct: 1.5, speedVol: 6 }],
+  ['Klang minimal', { bassDb: -6, barkPct: 0.5, hissPct: 0, speedVol: 0, startSound: false }]
+].slice(0, quick ? 2 : 3);
 
 // Fahrt als Abschnitte: [Dauer s, Funktion(t im Abschnitt) -> params, Aktion beim Start, Name, Prüfung]
 function trip(id) {
@@ -94,10 +101,10 @@ let fails = 0, runs = 0, cpu = 0, audioSec = 0;
 const issues = [];
 for (const id of Profiles.ids) {
   for (const mode of MODES) {
-    for (const vol of VOLS) {
+    for (const vol of VOLS) for (const [toneName, tone] of TONES) {
       runs++;
       const s = new Synth(SR);
-      s.configure({ profile: id, volume: vol, intensity: 0.7, enabled: true, mode, carIdle: 800, carRedline: 4800 });
+      s.configure(Object.assign({ profile: id, volume: vol, intensity: 0.7, enabled: true, mode, carIdle: 800, carRedline: 4800 }, tone));
       s._setProfile(id); s.pending = null; s._reset();
       const segs = trip(id), total = segs.reduce((a, g) => a + g[0], 0);
       const out = new Float32Array(Math.ceil(total * SR) + BLK), f = new Float32Array(BLK * 2), marks = [];
@@ -117,7 +124,7 @@ for (const id of Profiles.ids) {
         marks.push([start, pos, name, check]);
       }
       const dt = process.hrtime(t0); cpu += dt[0] * 1000 + dt[1] / 1e6; audioSec += pos / SR;
-      const tag = id + ' / ' + (mode || 'ohne Modus') + ' / ' + Math.round(vol * 100) + ' %';
+      const tag = id + ' / ' + (mode || 'ohne Modus') + ' / ' + Math.round(vol * 100) + ' % / ' + toneName;
       const fail = (msg) => { fails++; issues.push(tag + ': ' + msg); };
       if (bad) fail('NaN/Inf oder Spitze > 1');
       if (vol === 0 && peak > 1e-6) fail('Lautstärke 0, aber Spitze ' + peak.toFixed(4));

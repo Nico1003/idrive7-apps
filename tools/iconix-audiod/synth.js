@@ -54,6 +54,10 @@
   // Fahrmodus (Fahrerlebnisschalter): wie aggressiv der Sound ist. -1 = Eco (dezent, dumpf), 0 = Comfort,
   // 1 = Sport (lauter, offener, bellender, mehr Zischen), 1,4 = Sport+. Übergang weich über ~1 s.
   var MODE_AGG = { eco: -1, comfort: 0, sport: 1, sportplus: 1.4 };
+  // Lautstärke steigt mit dem Tempo (Wind- und Abrollgeräusche): ab 50 km/h, volle Anhebung (cfg.speedVol dB) ab 130 km/h
+  var SPD_FROM = 50, SPD_FULL = 130;
+  // Startsound beim Motorstart: Anlassen (Starter dreht den Motor), Anspringen mit Hochdrehen, Absinken auf Leerlauf
+  var START_CRANK = 0.35, START_FLARE = 0.75, START_END = 2.2;
   var DUCK_GAIN = 0.25;      // abgesenkt (Telefon, Ansage): ~-12 dB
   var COMP_T = 0.15, COMP_EXP = 0.667, COMP_MAKEUP = 3.0;
 
@@ -153,6 +157,7 @@
     this.cfg = {
       enabled: true, profile: Profiles.DEFAULT,
       volume: 0.6, intensity: 0.7, sport: false, duck: false, mode: null,
+      speedVol: 4, startSound: true, bassDb: 0, barkPct: 1, hissPct: 1,
       carIdle: 800, carRedline: 4800
     };
     this.target = { rpm: 800, load: 0, speed: 0, overrun: false };
@@ -167,6 +172,7 @@
     function k(sec) { return 1 - Math.exp(-CR / (sr * sec)); }
     this.kRel = Math.exp(-CR / (sr * 0.3)); this.kCompUp = k(0.25);
     this.prePk = 0; this.cEnv = 0; this.comp = COMP_MAKEUP;
+    this.offTime = -1; this.startT = -1; this.runG = 0; this.kRun = k(0.08);      // Startsound: Motor-aus-Dauer (-1 = läuft/unbekannt), Zeit im Ablauf
     this.agg = 0; this.aggCab = 0; this.kAgg = k(1.0); this.barkMul = 1;
     this.kR = k(0.025); this.kL = k(0.04); this.kS = k(0.2); this.kG = k(0.12); this.kGd = k(0.07); this.kV = k(0.1);
 
@@ -185,7 +191,7 @@
     this.fMuff = new Biquad(); this.fCabin = new Biquad(); this.fCabin2 = new Biquad(); this.fBoom = new Biquad();
     this.fGuard = new Biquad(); this.fGuard2 = new Biquad(); this.fDc = new Biquad();
     this.fElec = new Biquad(); this.fElec2 = new Biquad();
-    this.fHiss = new Biquad(); this.fHiss2 = new Biquad();
+    this.fHiss = new Biquad(); this.fHiss2 = new Biquad(); this.fBass = new Biquad();
     this.fHiss.set('bp', 2300, 0.8, sr); this.fHiss2.set('lp', 4500, 0.7, sr);
     this.hissK = Math.exp(-1 / (sr * 0.28)); this.hissA = 1 - Math.exp(-1 / (sr * 0.008));
     this.fGuard.set('lp', 6500, 0.71, sr); // nach dem Innenraum-Tiefpass reicht 2. Ordnung
@@ -203,7 +209,7 @@
     var d = p.drive || 1.2;
     this.drive = d; this.driveNorm = (1 + d) / d;
     // feste Filter des Profils
-    this.fBoom.set('lowshelf', p.boomHz || 80, 0.7, sr, p.boomDb || 4);
+    this._setBoom();
     this.fCabin.set('lp', p.cabinHz || 2600, 0.6, sr); this.aggCab = 0; // Fahrmodus-Anpassung setzt die Regelung neu
     this.fCabin2.set('peak', 1100, 0.9, sr, p.midDb || 0);
     if (p.kind !== 'electric') {
@@ -224,6 +230,16 @@
     }
   };
 
+  /** Dröhn-Anhebung des Profils und Einstellung "Bass" (dB). */
+  Synth.prototype._setBoom = function () {
+    var p = this.profile;
+    this.bassSet = this.cfg.bassDb;
+    this.fBoom.set('lowshelf', p.boomHz || 80, 0.7, this.sr, p.boomDb || 4);
+    // Einstellung "Bass": eigener Filter HINTER der Sättigung (davor würde die Sättigung die Anhebung plattdrücken)
+    this.useBass = this.cfg.bassDb !== 0;
+    if (this.useBass) this.fBass.set('lowshelf', 110, 0.7, this.sr, this.cfg.bassDb);
+  };
+
   Synth.prototype._reset = function () {
     this.phase = 0; this.dist = this.prep && this.prep.ang ? this.prep.ang[0] + 1e-6 : 0; this.next = 0;
     this.pOn.fill(0); this.pHigh = 0;
@@ -233,7 +249,7 @@
     this.cycVar = 0; this.bump = 0; this.vib1 = 0; this.vib2 = 0; this.combS = 0.2;
     this.wob = 0; this.wobT = 0;
     this.boost = 0; this.hissT = 0; this.hissE = 0; this.hissArm = false;
-    this.fHiss.reset(); this.fHiss2.reset();
+    this.fHiss.reset(); this.fHiss2.reset(); this.fBass.reset();
     var fl = [this.fMuff, this.fCabin, this.fCabin2, this.fBoom, this.fGuard, this.fGuard2, this.fDc,
       this.fElec, this.fElec2];
     for (var i = 0; i < fl.length; i++) fl[i].reset();
@@ -259,11 +275,20 @@
     this.cfg.intensity = clamp(finite(+this.cfg.intensity, 0.7), 0, 1);
     this.cfg.carIdle = clamp(finite(+this.cfg.carIdle, 800), 300, 2000);
     this.cfg.carRedline = clamp(finite(+this.cfg.carRedline, 4800), this.cfg.carIdle + 500, 12000);
+    this.cfg.speedVol = clamp(finite(+this.cfg.speedVol, 4), 0, 8);
+    this.cfg.bassDb = clamp(finite(+this.cfg.bassDb, 0), -8, 8);
+    this.cfg.barkPct = clamp(finite(+this.cfg.barkPct, 1), 0.3, 1.6);
+    this.cfg.hissPct = clamp(finite(+this.cfg.hissPct, 1), 0, 1.6);
+    if (this.cfg.bassDb !== this.bassSet && this.profile) this._setBoom();
     if (c.profile && c.profile !== this.cfg.profile && c.profile !== this.pending) this.pending = Profiles.get(c.profile).id;
   };
 
   Synth.prototype.setParams = function (p) {
     if (!p) return;
+    var r = finite(+p.rpm, -1);
+    // Motorstart: Motor stand mindestens 0,3 s (unter 150 U/min), jetzt dreht er -> Startsound
+    if (r >= 300 && this.offTime >= 0.3 && this.cfg.startSound && this.profile && this.profile.kind !== 'electric') this.startT = 0;
+    if (r >= 0 && r < 150) { if (this.offTime < 0) this.offTime = 0; } else if (r >= 150) this.offTime = -1;
     this.target.rpm = clamp(finite(+p.rpm, this.target.rpm), 0, 12000);
     this.target.load = clamp(finite(+p.load, this.target.load), 0, 1);
     this.target.speed = clamp(finite(+p.speed, this.target.speed), 0, 400);
@@ -302,13 +327,27 @@
     this.cEnv = lev > this.cEnv ? lev : this.cEnv * this.kRel;
     var cg = (this.cEnv > COMP_T ? Math.pow(COMP_T / this.cEnv, COMP_EXP) : 1) * COMP_MAKEUP;
     this.comp += (cg - this.comp) * (cg < this.comp ? 0.5 : this.kCompUp);
-    this.rpm += ((p.kind === 'electric' ? 0 : this._virtualRpm(this.target.rpm)) - this.rpm) * this.kR;
-    this.load += (this.target.load - this.load) * this.kL;
+    if (this.offTime >= 0) this.offTime += CR / sr;
+    var rpmT = p.kind === 'electric' ? 0 : this._virtualRpm(this.target.rpm), loadT = this.target.load;
+    if (this.startT >= 0) {
+      var st = this.startT, idle = p.idleRpm;
+      if (st < START_CRANK) { rpmT = 230 + 50 * Math.sin(st * 40); loadT = 0.12; }            // Starter dreht
+      else if (st < START_FLARE) { var u = smooth((st - START_CRANK) / (START_FLARE - START_CRANK)); rpmT = 400 + u * (idle * 1.9 - 400); loadT = 0.65; } // springt an, dreht hoch
+      else { var d = (st - START_FLARE) / (START_END - START_FLARE); rpmT = idle + (idle * 0.9) * Math.exp(-4 * d); loadT = 0.65 * (1 - smooth(d)) + 0.05; } // sinkt auf Leerlauf
+      this.startT += CR / sr;
+      if (this.startT >= START_END || this.target.rpm < 100) this.startT = -1;
+    }
+    this.rpm += (rpmT - this.rpm) * this.kR;
+    this.load += (loadT - this.load) * this.kL;
     this.speed += (this.target.speed - this.speed) * this.kS;
     this.gain += (tgtGain - this.gain) * (tgtGain < this.gain ? this.kGd : this.kG); // ausblenden schneller als einblenden
     this.vol += (tgtVol - this.vol) * this.kV;
     var xr = p.kind === 'electric' ? 0 : clamp(this.rpm / p.maxRpm, 0, 1);
-    var newAmp = this.gain * this.vol * HEADROOM * this.comp * (1 + RPM_LIFT * xr * Math.sqrt(xr));
+    var spd = clamp((this.speed - SPD_FROM) / (SPD_FULL - SPD_FROM), 0, 1), spdG = Math.pow(10, c.speedVol / 20) - 1;
+    // Motor springt an (Drehzahl aus Stille): ~80 ms einblenden – der Kompressor steht nach Stille auf voller
+    // Verstärkung und misst den Pegel währenddessen schon mit, sonst käme der erste Zündimpuls als Knall durch
+    this.runG += ((p.kind === 'electric' || this.rpm > 30 ? 1 : 0) - this.runG) * this.kRun;
+    var newAmp = this.gain * this.vol * HEADROOM * this.comp * this.runG * (1 + RPM_LIFT * xr * Math.sqrt(xr)) * (1 + spdG * smooth(spd));
     if (newAmp < 1e-5 && tgtGain === 0) newAmp = 0;
     this.ampStep = (newAmp - this.amp) / CR;
     if (p.kind === 'electric') this._controlElec(); else this._controlComb();
@@ -320,9 +359,13 @@
     var rpm = this.rpm, load = this.load;
     var agg = this.agg > 0 ? this.agg * clamp(0.2 + 0.8 * (this.target.overrun ? 0 : load), 0, 1) : this.agg;
     var inten = clamp(c.intensity * (1 + 0.35 * agg), 0.1, 1.3);
-    this.barkMul = clamp(1 + 0.5 * agg, 0.5, 1.7);
+    this.barkMul = clamp(1 + 0.5 * agg, 0.5, 1.7) * c.barkPct;
     // Innenraum-Tiefpass mit dem Fahrmodus: Eco dumpfer, Sport offener (nur neu setzen, wenn er sich merklich ändert)
-    if (Math.abs(agg - this.aggCab) > 0.02) { this.aggCab = agg; this.fCabin.set('lp', (p.cabinHz || 2600) * (1 + 0.2 * agg), 0.6, sr); }
+    // "Auspuff-Bellen" (barkPct): wie weit Schalldämpfer und Innenraumfilter öffnen und wie viel Auspuff im Klang ist
+    var bk = c.barkPct, open = Math.pow(bk, 0.8);
+    var cabF = (p.cabinHz || 2600) * (1 + 0.2 * agg) * Math.pow(bk, 0.6);
+    if (Math.abs(cabF - this.aggCab) > 15) { this.aggCab = cabF; this.fCabin.set('lp', cabF, 0.6, sr); }
+    this.exMixEff = this.exMix * (0.55 + 0.45 * bk);
     var x = clamp(rpm / p.maxRpm, 0, 1.1);
     this.x = x;
     // Kurbelwinkel je Sample (Anteil am 720°-Zyklus), Leerlauf-Ungleichförmigkeit
@@ -369,11 +412,11 @@
       if (this.target.load > 0.45 && this.boost > 0.3) this.hissArm = true;
       // Gas weg nach Ladedruck: Schubumluftventil öffnet -> Zischen, Ladedruck weg
       if (this.hissArm && (this.target.load < 0.15 || this.target.overrun)) {
-        this.hissT = Math.min(1, p.bov * (0.4 + 0.6 * this.boost) * inten / 0.7);
+        this.hissT = Math.min(1.6, p.bov * (0.4 + 0.6 * this.boost) * inten / 0.7 * c.hissPct);
         this.hissArm = false; this.boost *= 0.2;
       }
     }
-    this.fMuff.set('lp', (p.mufflerHz || 1200) * (1 + 0.3 * agg) * (0.75 + 0.5 * effLoad * inten + 0.15 * Math.min(x, 1) * (1 - effLoad)) * (0.85 + 0.3 * Math.min(x, 1)), p.mufflerQ || 0.7, sr);
+    this.fMuff.set('lp', (p.mufflerHz || 1200) * (1 + 0.3 * agg) * open * (0.75 + 0.5 * effLoad * inten + 0.15 * Math.min(x, 1) * (1 - effLoad)) * (0.85 + 0.3 * Math.min(x, 1)), p.mufflerQ || 0.7, sr);
   };
 
   Synth.prototype._controlElec = function () {
@@ -426,14 +469,14 @@
     var kH = this.kHdrLp, kP = this.kPipeLp, kC = this.kChamLp, kRad = this.kRadLp, kNz = this.kNz;
     var hdrFb = this.hdrFb, pipeFb = this.pipeFb, chamFb = this.chamFb;
     var fMuff = this.fMuff, fBoom = this.fBoom, fCab = this.fCabin, fCab2 = this.fCabin2, fG = this.fGuard, fG2 = this.fGuard2, fDc = this.fDc;
-    var useMid = !!this.profile.midDb;
+    var useMid = !!this.profile.midDb, useBass = this.useBass, fBass = this.fBass;
     var dph = this.dph, rip = this.rip, phase = this.phase, dist = this.dist, next = this.next;
     var unevT = this.unevW * 0.22 / Math.max(N, 1), uTime = P.uTime;
     var amp = this.amp, ampStep = this.ampStep, drive = this.drive, dn = this.driveNorm;
     var seed = this.seed | 0, peak = 0, pre = 0, bad = false;
     var k, j, r, white, nz1 = this.nz1, nz2 = this.nz2, in0, in1, y, s, a, o = off * 2, e, d, step, hi;
     var bump = this.bump, bumpK = 1 - 1 / (this.sr * 0.08);
-    var vib1 = this.vib1, vib2 = this.vib2, kVib = this.kVib, bark = this.bark * this.barkMul, exMix = this.exMix, vibMix = this.vibMix;
+    var vib1 = this.vib1, vib2 = this.vib2, kVib = this.kVib, bark = this.bark * this.barkMul, exMix = this.exMixEff || this.exMix, vibMix = this.vibMix;
     var hLp0 = this.hLp0, hLp1 = this.hLp1, pLp = this.pLp, pLp2 = this.pLp2, cLp = this.cLp, radLp = this.radLp, yPrev = this.yPrev;
     var hissT = this.hissT, hissE = this.hissE, hissK = this.hissK, hissA = this.hissA, fH = this.fHiss, fH2 = this.fHiss2;
 
@@ -497,6 +540,7 @@
       y = s * drive;
       s = y / (1 + (y < 0 ? -y : y)) * dn;
       s = fG.run(s);
+      if (useBass) s = fBass.run(s);
       a = s < 0 ? -s : s; if (a > pre) pre = a;
       if (hissT > 1e-4 || hissE > 1e-4) {
         hissE += (hissT - hissE) * hissA; hissT *= hissK;
@@ -526,6 +570,7 @@
   Synth.prototype._blockElec = function (out, off, n) {
     var ph = this.ePh, inc = this.eInc, w = this.eW, V = this.eN;
     var sPh = this.subPh, sInc = this.subInc, sW = this.subW, level = this.eLevel;
+    var useBass = this.useBass, fBass = this.fBass;
     var fE = this.fElec, fE2 = this.fElec2, fBoom = this.fBoom, fCab = this.fCabin, fG = this.fGuard, fG2 = this.fGuard2, fDc = this.fDc;
     var amp = this.amp, ampStep = this.ampStep, drive = this.drive, dn = this.driveNorm;
     var peak = 0, pre = 0, bad = false, k, j, x, dt, t, saw, sum, s, y, a, o = off * 2;
@@ -544,6 +589,7 @@
       s = fDc.run(s); s = fBoom.run(s); s = fCab.run(s);
       y = s * drive; s = y / (1 + (y < 0 ? -y : y)) * dn;
       s = fG.run(s);
+      if (useBass) s = fBass.run(s);
       a = s < 0 ? -s : s; if (a > pre) pre = a;
       amp += ampStep; s *= amp;
       if (s !== s) { s = 0; bad = true; } else if (s > 0.8 || s < -0.8) s = softLimit(s);

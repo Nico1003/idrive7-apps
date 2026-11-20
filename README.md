@@ -40,6 +40,10 @@ beim Gleiten bleibt er dezent im Hintergrund, im Schub blubbert er leise aus.
 - **Oben im Drehzahlband lauter,** wie ein echter Motor – auch bei Teillast.
 - **Folgt dem Fahrmodus:** In Eco Pro dezent und dumpfer, in Comfort normal, in Sport lauter, offener und
   bellender (mehr Zischen), in Sport+ noch etwas mehr. Der Wechsel geht weich über etwa eine Sekunde.
+- **Lauter bei hohem Tempo:** ab 50 km/h steigt der Sound sanft an, bei 130 km/h um +2, +4 oder +6 dB (einstellbar),
+  damit er gegen Wind- und Abrollgeräusche ankommt.
+- **Startsound:** Beim Motorstart dreht der Starter kurz durch, der Motor springt an, dreht hoch und fällt auf
+  Leerlauf – passend zum gewählten Profil (abschaltbar).
 - **Startet von selbst** mit dem Auto und läuft im Hintergrund – die App muss nicht geöffnet werden; schont das Head Unit
   (Klangberechnung direkt in 24 kHz, wenige Millisekunden Rechenzeit pro Sekunde Ton).
 
@@ -71,6 +75,8 @@ Konstantfahrt, Teillast):
   ganze Breite
 - **Bei Telefon/Ansagen leiser:** Telefonate, Sprachassistent, Parkpiepser und Warngongs senken den Motorsound um
   etwa 12 dB ab; Navigationsansagen bewusst nicht
+- **Klang anpassen:** Bass (Dröhnen) ±6 dB, Auspuff-Bellen 50–150 % (wie weit Schalldämpfer und Innenraum öffnen)
+  und Zischen 0–150 % – für jedes Profil
 - **Motor anpassen:** Leerlauf- und Abregeldrehzahl sowie maximales Drehmoment des eigenen Motors – der Sound
   bildet das echte Drehzahlband auf das Profil ab
 - **Experten:** Tonweg, Ausgabegerät und Lastquelle (zum Ausprobieren in anderen Autos)
@@ -111,8 +117,8 @@ Klappt es nicht auf Anhieb: In der Statuszeile sollte „Overlay-Mix: verbunden�
 
 | Komponente | Version |
 |---|---|
-| Sound Drive (App) | 0.9.8 |
-| Sound Drive Audio (Tool) | 0.9.8 |
+| Sound Drive (App) | 0.9.9 |
+| Sound Drive Audio (Tool) | 0.9.9 |
 
 ---
 
@@ -195,8 +201,9 @@ Rauschen); `iconix_calibrate.js` misst Pegel und Klangbild je Profil und schreib
 `iconix_popscan.js` sucht in einer Fahrt mit Schaltvorgängen nach Knacksern; `test_alsa_play.py` prüft den
 Python-Player mit einer simulierten Soundkarte; `test_engine_e2e.js` startet den Dienst mit echtem Player-Prozess und
 misst die Verzögerung; `iconix_soak.js` fährt jedes Profil in jedem Fahrmodus und jeder Lautstärke durch alle
-Fahrsituationen (Kaltstart, Schalten, Kickdown, Schub, Telefon, Profil- und Moduswechsel, Stumm, Datenlücke,
-Extremwerte, Abwürgen) und prüft auf NaN, Übersteuern, Knacken und Stille.
+Fahrsituationen (Kaltstart mit Startsound, Schalten, Kickdown, Schub, Telefon, Profil- und Moduswechsel, Stumm,
+Datenlücke, Extremwerte, Abwürgen), auch mit den Klang-Reglern in beiden Extremen, und prüft auf NaN, Übersteuern,
+Knacken und Stille.
 
 Der Klang folgt dem physikalisch informierten Ansatz von Baldan et al. (2015, „Physically informed car
 engine sound synthesis“) und den offenen Projekten

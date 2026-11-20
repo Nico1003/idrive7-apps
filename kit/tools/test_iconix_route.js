@@ -527,6 +527,78 @@ test('Oberfläche in allen Zuständen: nichts ragt über den Rand, keine leeren 
   }
 });
 
+function levelAt(cfg, params, secs) {
+  const s = new Synth(24000); s.configure(Object.assign({ profile: 'turbo4', volume: 0.8, enabled: true }, cfg)); s._setProfile(cfg.profile || 'turbo4');
+  const f = new Float32Array(480); let sum = 0, n = 0; const N = Math.round((secs || 3) * 100);
+  for (let k = 0; k < N; k++) { s.setParams(params); s.render(f, 240); if (k > N / 2) for (let i = 0; i < 480; i += 2) { sum += f[i] * f[i]; n++; } }
+  return Math.sqrt(sum / n);
+}
+
+test('Tempo-Lautstärke: bei 130 km/h um die eingestellten dB lauter, in der Stadt gleich, abschaltbar', () => {
+  const p = (v) => ({ rpm: 2200, load: 0.3, speed: v });
+  const db = (a, b) => 20 * Math.log10(a / b);
+  const city4 = levelAt({ speedVol: 4 }, p(40)), city0 = levelAt({ speedVol: 0 }, p(40));
+  // bei 50 % Lautstärke (oben begrenzt der Begrenzer, dann wirkt die Anhebung schwächer)
+  const hwy4 = levelAt({ speedVol: 4, volume: 0.5 }, p(135)), hwy0 = levelAt({ speedVol: 0, volume: 0.5 }, p(135)), hwy6 = levelAt({ speedVol: 6, volume: 0.5 }, p(135));
+  assert.ok(Math.abs(db(city4, city0)) < 0.2, 'Stadt unverändert: ' + db(city4, city0).toFixed(2) + ' dB');
+  assert.ok(Math.abs(db(hwy4, hwy0) - 4) < 0.8, 'Autobahn +4 dB: ' + db(hwy4, hwy0).toFixed(2));
+  assert.ok(db(hwy6, hwy4) > 1.2, 'Stark lauter als Mittel');
+});
+
+test('Startsound: Motor aus -> an spielt Anlassen, Hochdrehen, Leerlauf; aus = kein Ablauf', () => {
+  const run = (startSound) => { const s = new Synth(24000); s.configure({ profile: 'supra', volume: 0.8, enabled: true, startSound }); s._setProfile('supra');
+    const f = new Float32Array(480); let maxRpm = 0, pk = 0, crank = 0;
+    for (let k = 0; k < 400; k++) { const t = k / 100; s.setParams({ rpm: t < 1 ? 0 : 820, load: 0.04, speed: 0 }); pk = Math.max(pk, s.render(f, 240));
+      if (t > 1 && t < 4) maxRpm = Math.max(maxRpm, s.rpm); if (t > 1.05 && t < 1.3) crank = Math.max(crank, s.rpm); }
+    return { maxRpm, pk, crank, endRpm: s.rpm }; };
+  const on = run(true), off = run(false), idle = Profiles.get('supra').idleRpm;
+  assert.ok(on.maxRpm > idle * 1.5, 'Hochdrehen: ' + Math.round(on.maxRpm));
+  assert.ok(on.crank < 320, 'Anlassen mit Starterdrehzahl: ' + Math.round(on.crank));
+  assert.ok(Math.abs(on.endRpm - idle) < 60, 'danach Leerlauf: ' + Math.round(on.endRpm));
+  assert.ok(off.maxRpm < idle * 1.15, 'ohne Startsound kein Hochdrehen: ' + Math.round(off.maxRpm));
+  assert.ok(on.pk <= 1);
+  // läuft der Motor schon, wenn die App startet: kein Startsound
+  const s = new Synth(24000); s.configure({ profile: 'supra', volume: 0.8, enabled: true }); s._setProfile('supra');
+  const f = new Float32Array(480); let mx = 0;
+  for (let k = 0; k < 200; k++) { s.setParams({ rpm: 820, load: 0.04, speed: 0 }); s.render(f, 240); mx = Math.max(mx, s.rpm); }
+  assert.ok(mx < idle * 1.15, 'Motor lief schon: kein Startsound');
+});
+
+test('Klang-Regler: Bass, Bellen und Zischen wirken', () => {
+  const p = { rpm: 2500, load: 0.5, speed: 80 };
+  // Bass: Verhältnis 20–140 Hz zu 140–600 Hz (Frequenzanalyse). Der Kompressor hält die Gesamtlautstärke,
+  // das Verhältnis Bass/Mitten verschiebt sich – das hört man als mehr oder weniger Bass.
+  const lowShare = (cfg) => { const s = new Synth(24000); s.configure(Object.assign({ profile: 'turbo4', volume: 0.5, enabled: true }, cfg)); s._setProfile('turbo4');
+    const f = new Float32Array(480), x = [];
+    for (let q = 0; q < 300; q++) { s.setParams({ rpm: 1800, load: 0.5, speed: 80 }); s.render(f, 240); if (q > 150) for (let i = 0; i < 480; i += 2) x.push(f[i]); }
+    const band = (lo, hi) => { let en = 0; for (let fr = lo; fr < hi; fr += 5) { let re = 0, im = 0; for (let i = 0; i < x.length; i += 2) { const w = 2 * Math.PI * fr * i / 24000; re += x[i] * Math.cos(w); im += x[i] * Math.sin(w); } en += re * re + im * im; } return en; };
+    return band(20, 140) / band(140, 600); };
+  const lb = lowShare({}), lp6 = lowShare({ bassDb: 6 }), lm6 = lowShare({ bassDb: -6 });
+  assert.ok(lp6 > lb * 1.8 && lm6 < lb * 0.55, 'Bass/Mitten: ' + lm6.toFixed(2) + ' < ' + lb.toFixed(2) + ' < ' + lp6.toFixed(2));
+  // Bellen: Anteil 250–1200 Hz gegenüber 40–250 Hz steigt deutlich
+  const midShare = (cfg) => { const s = new Synth(24000); s.configure(Object.assign({ profile: 'turbo4', volume: 0.4, enabled: true }, cfg)); s._setProfile('turbo4');
+    const f = new Float32Array(480), x = [];
+    for (let q = 0; q < 300; q++) { s.setParams({ rpm: 3200, load: 0.8, speed: 90 }); s.render(f, 240); if (q > 150) for (let i = 0; i < 480; i += 2) x.push(f[i]); }
+    const band = (lo, hi, st) => { let en = 0; for (let fr = lo; fr < hi; fr += st) { let re = 0, im = 0; for (let i = 0; i < x.length; i += 2) { const w = 2 * Math.PI * fr * i / 24000; re += x[i] * Math.cos(w); im += x[i] * Math.sin(w); } en += re * re + im * im; } return en; };
+    return band(250, 1200, 6) / band(40, 250, 4); };
+  const m50 = midShare({ barkPct: 0.5 }), m150 = midShare({ barkPct: 1.5 });
+  assert.ok(m150 > m50 * 1.6, 'Bellen 50 % ' + m50.toFixed(3) + ' vs 150 % ' + m150.toFixed(3));
+  // Zischen: aus = 0, 150 % > 100 %
+  const hiss = (pct) => { const pr = Profiles.get('supra'); const fn = (t) => t < 3 ? { rpm: 2000 + 1500 * t / 3, load: 1, speed: 80 } : { rpm: 3500 - 400 * (t - 3), load: 0, overrun: true, speed: 80 };
+    const runIt = (bov) => { const b = pr.bov; pr.bov = bov; const s = new Synth(24000); s.configure({ profile: 'supra', volume: 1, intensity: 0.7, enabled: true, hissPct: pct }); s._setProfile('supra');
+      const f = new Float32Array(480), out = []; for (let k = 0; k < 500; k++) { s.setParams(fn(k / 100)); s.render(f, 240); for (let i = 0; i < 480; i += 2) out.push(f[i]); } pr.bov = b; return out; };
+    const a = runIt(pr.bov), c = runIt(0); let e = 0; for (let i = 72000; i < 81600; i++) e += (a[i] - c[i]) ** 2; return Math.sqrt(e / 9600); };
+  const h0 = hiss(0), h1 = hiss(1), h15 = hiss(1.5);
+  assert.ok(h0 < 1e-6 && h15 > h1 * 1.2, 'Zischen aus ' + h0.toFixed(4) + ', 100 % ' + h1.toFixed(3) + ', 150 % ' + h15.toFixed(3));
+});
+
+test('Einstellungen der neuen Funktionen vorhanden', () => {
+  const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/iconix_sounds/app.json'), 'utf8'));
+  const by = Object.fromEntries(j.settings.map((x) => [x.key, x]));
+  assert.strictEqual(by.speedVol.default, 4); assert.strictEqual(by.startSound.default, true);
+  ['bassDb', 'bark', 'hiss'].forEach((k) => assert.strictEqual(by[k].group, 'Klang anpassen'));
+});
+
 (async () => {
   let fail = 0;
   for (const [name, fn] of tests) {

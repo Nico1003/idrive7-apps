@@ -25,11 +25,11 @@ const AudioLink = require('./audio_link');
 const VehicleFeed = require('./vehicle_feed');
 const CarRoute = require('./car_route');
 
-const VERSION = '0.9.8';
+const VERSION = '0.9.9';
 const ROUTE_GRACE_MS = 3000; // so lange nach dem letzten Ton bleibt die Audiomanager-Verbindung bestehen
 const DEFAULTS = {
   enabled: true, profile: Profiles.DEFAULT, volume: 80, intensity: 70, sport: false,
-  muteParked: false, duck: true, followMode: true, wide: false, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
+  muteParked: false, duck: true, followMode: true, wide: false, speedVol: 4, startSound: true, bassDb: 0, bark: 100, hiss: 100, loadSource: 'auto', route: CarRoute.DEFAULT_ROUTE, alsaDevice: 'auto', maxTorque: 400, carIdle: 800, carRedline: 4800
 };
 
 function setting(settings, key) {
@@ -76,7 +76,12 @@ function startCore(host) {
       route: CarRoute.ROUTES[String(g('route'))] ? String(g('route')) : CarRoute.DEFAULT_ROUTE,
       device: 'auto',
       duck: false,
-      mode: bool(g('followMode')) ? driveMode : null
+      mode: bool(g('followMode')) ? driveMode : null,
+      speedVol: num(g('speedVol'), 4),
+      startSound: bool(g('startSound')),
+      bassDb: num(g('bassDb'), 0),
+      barkPct: num(g('bark'), 100) / 100,
+      hissPct: num(g('hiss'), 100) / 100
     };
     // Gerät für den Dienst: SmartX-Kanal des Tonwegs, bei "ALSA direkt" das frühere Ausgabegerät
     const rt = CarRoute.route(synthCfgCache.route);
